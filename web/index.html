@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DriftSeq emu — polymetric master sequencer</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background:#101014; color:#c9c9d4; font:14px/1.45 ui-monospace,Menlo,Consolas,monospace; margin:0; display:flex; gap:18px; padding:16px; }
+  h1 { font-size:15px; margin:0 0 8px; color:#e8e8f0; }
+  #screen { border:1px solid #333; image-rendering:pixelated; width:480px; height:480px; background:#000; }
+  .col { display:flex; flex-direction:column; gap:10px; }
+  button { background:#1c1c24; color:#c9c9d4; border:1px solid #3a3a48; border-radius:4px; padding:6px 14px; font:inherit; cursor:pointer; }
+  button:hover { background:#26262f; }
+  button.on { background:#2d5a3a; border-color:#3f8a55; color:#d4ffd9; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .lbl { color:#8a8a99; font-size:12px; }
+  input[type=range]{ width:140px; }
+  #log { font-size:11px; color:#7f7f8f; max-width:520px; max-height:180px; overflow:auto; }
+  a { color:#7fa8d9; }
+  .trackbtn { min-width:34px; }
+  .muted { opacity:.45; }
+</style>
+</head>
+<body>
+<div class="col">
+  <h1>DriftSeq <span class="lbl">— 16-track polymetric, pure-C engine (wasm)</span></h1>
+  <canvas id="screen" width="240" height="240"></canvas>
+  <div class="row">
+    <button id="b_play">▶ PLAY</button>
+    <button id="b_stop">■ STOP</button>
+    <span class="lbl">BPM</span> <input id="bpm" type="range" min="40" max="240" value="120" step="1"> <span id="bpmv">120</span>
+    <span class="lbl">swing</span> <input id="sw" type="range" min="0" max="100" value="0">
+    <button id="b_grid">SEQ grid</button>
+  </div>
+  <div class="row" id="tracks"><!-- track buttons injected --></div>
+  <div class="row">
+    <span class="lbl">selected track params:</span>
+    <span class="lbl">START</span> <input id="t_start" type="range" min="0" max="63" value="0">
+    <span class="lbl">LEN</span> <input id="t_len" type="range" min="1" max="64" value="16">
+    <span class="lbl">EU K</span> <input id="t_k" type="range" min="0" max="16" value="0">
+    <span class="lbl">EU N</span> <input id="t_n" type="range" min="2" max="16" value="16">
+    <button id="b_eu">apply Euclid</button>
+    <button id="b_clear">clear track</button>
+  </div>
+  <div class="row">
+    <span class="lbl">MIDI out:</span>
+    <select id="midiouts"><option>— none (WebAudio beeps) —</option></select>
+    <button id="b_refresh">refresh</button>
+    <span class="lbl" id="webmidi-state"></span>
+  </div>
+  <div id="log">keys: space=play/stop · 1-8 select track · g=HOME/SEQ · click grid to toggle steps · drag sliders for live window morph</div>
+</div>
+<div class="col">
+  <h1>README</h1>
+  <div class="lbl" style="max-width:420px">
+    HOME hero screen: 16 horizontal bars = the 16 tracks across all 64 steps of the pattern.
+    Each bar lights from its own loop_start for loop_len steps — unequal windows &amp; divisions
+    drift apart and re-align at LCM. That visible drift is the product.
+    <br><br>
+    Drums (trk0-2, GM ch10) · bass (trk3, prog38) · lead (trk4, prog81) as the default demo.
+    Click bars in SEQ view to toggle steps; sliders morph the selected track's window live
+    (K3/K4 semantics from spec 02 §2.1). WebMIDI out when a device/DAW is connected — the byte
+    stream is the same one the FM-1 firmware will emit (golden hash 5828982717F322ED over
+    20 s of the demo, byte-identical host C and browser wasm).
+  </div>
+</div>
+<script src="driftseq.js"></script>
+<script src="emu.js"></script>
+</body>
+</html>

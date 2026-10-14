@@ -22,12 +22,35 @@ Specs in `docs/specs/` (2026-10-14 series):
 | 04-gm-monitor | Sonivox EAS recipe (Polly-proven), loopback wiring, free MIDI-in module mode |
 | 05-vocabulary | locked product language + banned-terms table |
 
-Status: spec phase closed — remaining input-detail decisions are **play-gated**
-(tested on device / on idea-1's web emu once it exists, not on paper).
+Status: **web/emu is live** — spec phase closed, remaining input-detail decisions are
+**play-gated** (test them in the emu or on device).
 
-Next: **host sim** (`host/`) — pure-C engine `drift_tick(state,in)->bytes[]`,
-240×240 PNG rendering, `.ctl` scenarios, golden-hash assertions on BOTH the MIDI
-byte stream and the screen bitmap.
+## Run it
+
+**Browser emu** (`web/`): `python3 -m http.server 8931` in `web/`, open
+`http://127.0.0.1:8931/` — 240×240 HOME hero drift screen + SEQ grid, WebMIDI out
+(chrome/edge), WebAudio beeps otherwise. Sliders morph the selected track's loop
+window live (PLAY: K3=START K4=LEN semantics). SPACE play/stop, 1–8 select, G toggles
+HOME/SEQ, click grid cells to toggle steps.
+
+**Host tests** (`host/` + `Makefile`): `make test` — determinism, window semantics,
+probability, Euclid, drift re-alignment at LCM, silent-keep toggles, 4-voice cap.
+`make golden` — the MIDI byte stream of the 20 s demo locks to hash
+**`5828982717F322ED`** (demo pattern @ seed 42, 64-frame ticks).
+
+**wasm parity** (`web/wasmtest.mjs`): `make wasmtest` proves the browser engine emits
+a byte-identical stream to host C. The engine is the same C the firmware will use;
+the emu is its first consumer.
+
+```
+driftseq.h/.c      pure-C deterministic engine (ds_tick -> MIDI bytes, seeded RNG)
+demo_pattern.c     default demo (kick/snare/hats Euclid + bass + lead, drifts immediately)
+drift_web.c        emscripten bridge (state offsets exported, JS reads volatiles)
+emu.js             240×240 canvas (HOME hero + SEQ grid), WebMIDI/WebAudio
+```
+
+Next: FM-1 firmware port (keyscan/LED/USB layers from the ecosystem), then EAS GM
+monitor on-device.
 
 ## License
 
