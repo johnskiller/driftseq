@@ -365,7 +365,11 @@ function drawEdit(){
   ctx.font='11px monospace';
   const v0n=(nv>0)?H8[S+vBase]:null;
   const NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-  const nm=(v0n===null||v0n===0xFF)?'':` ${NAMES[v0n%12]}${Math.floor(v0n/12)-1}`;
+  const isDrum=trkU8(t,'channel')===9;
+  let nm='';
+  if(v0n!==null&&v0n!==0xFF){
+    nm = isDrum ? ` ${GM_SHORT[GM_DRUMS.indexOf(v0n)]||('D'+v0n)}` : ` ${NAMES[v0n%12]}${Math.floor(v0n/12)-1}`;
+  }
   ctx.fillStyle='#d9d9e8'; ctx.fillText(`EDIT TRK ${t+1} · st${s}${nm}`,6,14);
   // voice cards: 4 rows, active card inverted
   for(let vi=0;vi<4;vi++){
@@ -383,7 +387,8 @@ function drawEdit(){
       const on=stepU8(t,s,'on');
       const sym=!on?'●':(playing&&i32(OFF.pos16+t*4)===s)?'▶':'○';   // ●=silent-keep ▶=sounding ○=armed
       const gn=gate===0xFF?'∞':(gate/4).toFixed(2);
-      ctx.fillText(`v${vi+1} ${sym} ${NAMES[note%12]}${Math.floor(note/12)-1}`,14,y+27);
+      const nm2=isDrum?(GM_SHORT[GM_DRUMS.indexOf(note)]||('D'+note)):`${NAMES[note%12]}${Math.floor(note/12)-1}`;
+      ctx.fillText(`v${vi+1} ${sym} ${nm2}`,14,y+27);
       ctx.font='10px monospace'; ctx.fillStyle='#8a8a99';
       ctx.fillText(`${String(note).padStart(3,'0')}`,118,y+27);
       ctx.fillText(`V${vel} G${gn}`,150,y+27);
