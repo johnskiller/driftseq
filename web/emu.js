@@ -287,18 +287,17 @@ function refreshMidi(){
     const sel=$('midiouts'); if(!sel) return;
     const outs=[...acc.outputs.values()];
     const prev=midiOut?midiOut.id:null;
-    sel.innerHTML='';
+    sel.innerHTML='<option value="">— none (beeps only, no loop) —</option>';
     if(!outs.length){
-      sel.innerHTML='<option>— no MIDI outputs —</option>';
       if(st) st.textContent='no outputs found';
       midiOut=null;
       return;
     }
     for(const o of outs){ const op=document.createElement('option'); op.value=o.id; op.textContent=o.name; sel.appendChild(op); }
     sel.onchange=()=>{ midiOut=outs.find(o=>o.id===sel.value)||null; if(midiOut) monEvent([0xF6]); };
-    // keep the previous choice if still present, else take the first
-    midiOut=outs.find(o=>o.id===prev)||outs[0];
-    sel.value=midiOut.id;
+    // keep the previous choice if still present; default is NONE (the IAC loop lesson)
+    midiOut=outs.find(o=>o.id===prev)||null;
+    sel.value=midiOut?midiOut.id:'';
     if(st) st.textContent=outs.length+' out(s) ready';
   },e=>{ if(st) st.textContent='WebMIDI denied'; });
 }
