@@ -263,6 +263,7 @@ const DSPanel = (() => {
     screen:()=>canvas,
     B, EN,
     knobName:(role)=>KNOBS[role+1],
+    syncKeys,                                       // exposed: STOP clears phantom held keys
     /* --- hardware drive (fm1-ctrl): same path a finger takes --- */
     btnDown:(bit)=>{ btnBy.set("m"+bit,bit); syncButtons(); },
     btnUp:(bit)=>{ if(btnBy.delete("m"+bit)) syncButtons(); },
