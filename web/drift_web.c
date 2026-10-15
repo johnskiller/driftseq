@@ -147,3 +147,26 @@ int ds_live_off_wasm(int trk, int note) {
 }
 EMSCRIPTEN_KEEPALIVE
 int ds_live_pending(void) { return (int)g.live_n; }
+
+/* ---- EDIT page helpers (03 §3): cond offset for JS; gate/vel/cond/note writes ---- */
+EMSCRIPTEN_KEEPALIVE
+int ds_step_off_cond(void)  { ds_step s; return (int)((uintptr_t)&s.cond - (uintptr_t)&s); }
+EMSCRIPTEN_KEEPALIVE
+int ds_voice_off_vel(void)  { ds_note n; return (int)((uintptr_t)&n.vel - (uintptr_t)&n); }
+EMSCRIPTEN_KEEPALIVE
+int ds_voice_off_gate(void) { ds_note n; return (int)((uintptr_t)&n.gate - (uintptr_t)&n); }
+EMSCRIPTEN_KEEPALIVE
+void ds_note_set_wasm(int trk, int step, int vi, int note, int vel, int gate) {
+    if (trk < 0 || trk >= DS_TRACKS || step < 0 || step >= DS_STEPS) return;
+    ds_step *sp = &g.pat.track[trk].steps[step];
+    if (vi < 0 || vi >= sp->nvoices) return;
+    if (note >= 0) sp->v[vi].note = (uint8_t)note;
+    if (vel  >= 0) sp->v[vi].vel  = (uint8_t)vel;
+    if (gate >= 0) sp->v[vi].gate = (uint8_t)gate;
+}
+EMSCRIPTEN_KEEPALIVE
+void ds_cond_set_wasm(int trk, int step, int cond) {
+    if (trk < 0 || trk >= DS_TRACKS || step < 0 || step >= DS_STEPS) return;
+    if (cond < 0 || cond >= DS_COND_COUNT) return;
+    g.pat.track[trk].steps[step].cond = (uint8_t)cond;
+}
