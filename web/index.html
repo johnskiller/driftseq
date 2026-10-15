@@ -55,9 +55,13 @@ footer small { font-size:11px; opacity:.8; }
   <canvas id="screen" width="240" height="240" role="img" aria-label="The screen"></canvas>
   <div class="start" id="start"><button id="go" type="button">Switch on</button><p id="status" hidden></p></div>
 </div>
-<div id="mon"><span class="t">midi out</span> — press Switch on, then PLAY</div>
-<div style="max-width:1040px;margin:6px auto 0;display:flex;gap:8px;align-items:center">
-  <span style="font-size:12px;color:var(--dim)">MIDI out:</span>
+<div id="mon"><span class="t">midi</span> — press Switch on, then PLAY</div>
+<div style="max-width:1040px;margin:6px auto 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+  <span style="font-size:12px;color:var(--dim)">MIDI in:</span>
+  <select id="midiins" style="font:inherit;background:var(--tray);color:var(--label);border:1px solid var(--rule);border-radius:6px;padding:3px 8px">
+    <option>— all inputs —</option>
+  </select>
+  <span style="font-size:12px;color:var(--dim)">out:</span>
   <select id="midiouts" style="font:inherit;background:var(--tray);color:var(--label);border:1px solid var(--rule);border-radius:6px;padding:3px 8px">
     <option>— none (WebAudio beeps only) —</option>
   </select>

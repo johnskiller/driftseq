@@ -36,12 +36,14 @@ const COLORS=[
 
 function i32(off){const d=new DataView(M.HEAPU8.buffer);return d.getInt32(S+off,true);}
 function f64(off){const d=new DataView(M.HEAPU8.buffer);return d.getFloat64(S+off,true);}
+function safeU8(off){ try{ return H8[off]|0; }catch(_){ return 0; } }   // guards during boot races
 function trkOff(t){return OFF.tracks+t*TK.stride;}
-function trkU8(t,f){return H8[S+trkOff(t)+TK[f]];}
+function trkU8(t,f){return safeU8(S+trkOff(t)+TK[f]);}
 function stepOff(t,s){return trkOff(t)+TK.steps+s*ST.size;}
-function stepU8(t,s,f){return H8[S+stepOff(t,s)+ST[f]];}
+function stepU8(t,s,f){return safeU8(S+stepOff(t,s)+ST[f]);}
 
 function readMidiOut(){
+  if(!M||!H8||!OFF.out_len) return;              // boot race guard
   const n=i32(OFF.out_len), base=OFF.out;
   if(n>0){
     const bytes=H8.slice(S+base,S+base+n);
@@ -272,6 +274,7 @@ function refreshMidi(){
  *   CC 27          -> MASTER (abs 0..127)                                        */
 const BTN_CC0=40, ENC_CC0=20;
 const keyStates=new Set();                       // notes currently held from hardware
+let midiInId='all';                              // 'all' = bind every input
 function noteToKeyIdx(note){ return note-53; }   // key idx 0..26
 function midiIn3(st,d1,d2){
   const t=st&0xF0, ch=st&0x0F;
@@ -286,9 +289,7 @@ function midiIn3(st,d1,d2){
     if(d1>=BTN_CC0&&d1<BTN_CC0+14){              // button press/release, bit = cc-40
       const bit=d1-BTN_CC0;
       if(v>=64) DSPanel.btnDown(bit); else DSPanel.btnUp(bit);
-    } else if(ch===0&&d1>=ENC_CC0&&d1<ENC_CC0+7){        // encoder turn, relative 64±n
-      DSPanel.turnRole(d1-ENC_CC0, v-64);
-    } else if(ch===1&&d1>=ENC_CC0&&d1<ENC_CC0+7){        // push+turn layer
+    } else if((ch===0||ch===1)&&d1>=ENC_CC0&&d1<ENC_CC0+7){ // encoder turn (ch2 = push+turn)
       DSPanel.turnRole(d1-ENC_CC0, v-64);
     } else if(d1===27){                          // MASTER (absolute)
       DSPanel.masterVol(v);
@@ -296,13 +297,22 @@ function midiIn3(st,d1,d2){
   }
 }
 function bindMidiIn(acc){
-  for(const inp of acc.inputs.values()){
-    inp.onmidimessage=(e)=>{
+  const ins=[...acc.inputs.values()];
+  const sel=$('midiins');
+  if(sel){
+    const prev=midiInId;
+    sel.innerHTML='<option value="all">— all inputs —</option>';
+    for(const i of ins){ const op=document.createElement('option'); op.value=i.id; op.textContent=i.name; sel.appendChild(op); }
+    sel.value=[...sel.options].some(o=>o.value===prev)?prev:'all';
+    sel.onchange=()=>{ midiInId=sel.value; bindMidiIn(acc); };
+  }
+  for(const i of ins){
+    const want = midiInId==='all' || i.id===midiInId;
+    i.onmidimessage = want ? (e)=>{
       const d=e.data;
       if(!d||d.length<2||d[0]>=0xF0) return;     // ignore realtime/system
-      // swallow echo of our own out stream only if it came back on an input we didn't choose — keep simple: accept all
       midiIn3(d[0],d[1],d[2]||0);
-    };
+    } : null;
   }
 }
 
@@ -311,6 +321,19 @@ function ensureAudio(){
   if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
   started=true;
 }
+
+/* crash guard: any uncaught error surfaces in the mini monitor (page keeps running) */
+addEventListener('error',e=>{
+  try{ monEvent([0xF0]); }catch(_){}
+  const mon=$('mon');
+  if(mon) mon.innerHTML=`<span class="t">CRASH</span> ${String(e.message||e.error).slice(0,120)}`;
+  console.error(e.error||e.message);
+});
+addEventListener('unhandledrejection',e=>{
+  const mon=$('mon');
+  if(mon) mon.innerHTML=`<span class="t">CRASH</span> ${(String(e.reason&&(e.reason.message||e.reason))).slice(0,120)}`;
+  console.error('unhandled rejection:', e.reason);
+});
 
 /* ---------- boot ---------- */
 async function boot(){
