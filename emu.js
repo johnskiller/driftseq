@@ -16,6 +16,7 @@ const mon=$('mon');
 let monCount=0;
 
 function monEvent(bytes){
+  if(!bytes||!bytes.length) return;
   monCount++;
   let txt;
   const b=bytes, t=b[0]&0xF0;
@@ -56,6 +57,7 @@ function readMidiOut(){
         for(let t=0;t<TRACKS;t++) if(trkU8(t,'channel')===ch){ flash[t]=1; break; }
         beep(bytes[i+1],bytes[i+2]);
       }
+      else if(type===0xB0){ monEvent(bytes.slice(i,i+3)); }   // CC (stop's all-notes-off lands here)
       i+=3;
     }
   }
@@ -175,27 +177,31 @@ function frame(t){
 /* ---------- panel semantics (02-input) ---------- */
 function panelButton(ev){
   if(!ev) return;
-  const bits = Array.isArray(ev) ? ev : (ev.bits || []);
-  const down = Array.isArray(ev) ? true : (ev.down !== false);
-  for(const bit of bits){
-    const name=Object.entries(DSPanel.B).find(([n,b])=>b===bit)?.[0];
+  // ev.bits = buttons currently held; ev.released = buttons just released (PLAY/STOP is one
+  // physical button: a click = down+up in the same mask → toggle on the release edge)
+  const downBits = Array.isArray(ev) ? ev : (ev.bits || []);
+  const upBits   = Array.isArray(ev) ? []  : (ev.released || []);
+  for(const bit of downBits){
+    const name=bitName(bit);
     switch(name){
-      case 'PLAY': if(down&&!playing){ ensureAudio(); M._ds_play_wasm(); playing=true; } break;
-      case 'STOP': case 'HOME':
-        if(name==='STOP'&&down&&playing){ M._ds_stop_wasm(); playing=false; }
-        if(name==='HOME'&&down){ mode = mode==='home'?'grid':'home'; page=0; }
-        break;
-      case 'SEQ': if(down){ mode='grid'; } break;
-      case 'ARP': if(down){ mode='home'; } break;   // v1: no Euclid page yet, ARP->home
-      case 'OCT-': if(down) page=(page+3)&3; break;
-      case 'OCT+': if(down) page=(page+1)&3; break;
-      case 'REC': if(down){ M._ds_toggle_step_wasm(selTrack,cursor); } break; // v1: REC=cursor toggle
-      case 'SELECT': if(down) selectTrack((selTrack+15)%16); break;           // held-shift in KEYMAP; click cycles
-      case 'SAVE': case 'FX': case 'SCL': case 'ENV': case 'LFO': case 'EDIT': case 'GLO':
-        break;                                      // v1: unsignaled
+      case 'SEQ': mode='grid'; break;
+      case 'ARP': mode='home'; break;               // v1: no Euclid page yet
+      case 'OCT-': page=(page+3)&3; break;
+      case 'OCT+': page=(page+1)&3; break;
+      case 'REC': M._ds_toggle_step_wasm(selTrack,cursor); break;  // v1: REC=cursor toggle
+      case 'HOME': mode = mode==='home'?'grid':'home'; page=0; break;
+      case 'PLAY': if(!playing){ ensureAudio(); M._ds_play_wasm(); playing=true; } break; // down starts
+      case 'SELECT': selectTrack((selTrack+15)%16); break;
+      default: break;                               // SAVE/FX/SCL/ENV/LFO/EDIT/GLO: v1 unsignaled
+    }
+  }
+  for(const bit of upBits){
+    if(bitName(bit)==='PLAY'){                       // release stops (single PLAY/STOP key)
+      if(playing){ M._ds_stop_wasm(); playing=false; readMidiOut(); }  // drain the CC123 all-notes-off
     }
   }
 }
+function bitName(bit){ return Object.entries(DSPanel.B).find(([n,b])=>b===bit)?.[0]; }
 function panelEnc(role,n){
   if(role===0){ selectTrack((selTrack+ (n>0?1:15))%16); return; }             // SELECT: track
   if(role===1){ M._ds_set_bpm_wasm(Math.max(40,Math.min(240,f64(OFF.bpm)+n))); return; } // ALGORITHM: BPM (v1)
@@ -217,16 +223,28 @@ function selectTrack(t){
 
 /* ---------- WebMIDI out ---------- */
 function refreshMidi(){
-  if(!navigator.requestMIDIAccess) return;
+  const st=$('webmidi-state');
+  if(!navigator.requestMIDIAccess){ if(st) st.textContent='WebMIDI unavailable (Chrome/Edge)'; return; }
   navigator.requestMIDIAccess({sysex:false}).then(acc=>{
-    midiAccess=acc; const sel=$('midiouts'); if(!sel) return;
+    midiAccess=acc;
+    acc.onstatechange=()=>refreshMidi();            // hot-plug: a device appearing refreshes
+    const sel=$('midiouts'); if(!sel) return;
     const outs=[...acc.outputs.values()];
-    if(!outs.length) return;
+    const prev=midiOut?midiOut.id:null;
     sel.innerHTML='';
+    if(!outs.length){
+      sel.innerHTML='<option>— no MIDI outputs —</option>';
+      if(st) st.textContent='no outputs found';
+      midiOut=null;
+      return;
+    }
     for(const o of outs){ const op=document.createElement('option'); op.value=o.id; op.textContent=o.name; sel.appendChild(op); }
-    sel.onchange=()=>{ midiOut=outs.find(o=>o.id===sel.value)||null; };
-    midiOut=outs.find(o=>o.id===sel.value)||null;
-  },()=>{});
+    sel.onchange=()=>{ midiOut=outs.find(o=>o.id===sel.value)||null; if(midiOut) monEvent([0xF6]); };
+    // keep the previous choice if still present, else take the first
+    midiOut=outs.find(o=>o.id===prev)||outs[0];
+    sel.value=midiOut.id;
+    if(st) st.textContent=outs.length+' out(s) ready';
+  },e=>{ if(st) st.textContent='WebMIDI denied'; });
 }
 
 let page=0, started=false;
@@ -256,17 +274,17 @@ async function boot(){
   DSPanel.onKey(stepEntry);
   DSPanel.onEnc(panelEnc);
 
-  document.getElementById('go').addEventListener('click',()=>{
+  $('go').addEventListener('click',()=>{
     ensureAudio();
-    document.getElementById('start').hidden=true;
+    $('start').hidden=true;
     rafId=requestAnimationFrame(frame);
-    monEvent([0xC0,0x00]);  mon.lastChild; // n/a
+    refreshMidi();                                  // user gesture: ask for WebMIDI here
   });
+  $('b_refresh').addEventListener('click',refreshMidi);
 
-  refreshMidi();
   selectTrack(0);
-  document.getElementById('status').textContent='engine loaded · demo pattern (seed 42)';
-  document.getElementById('status').hidden=false;
+  $('status').textContent='engine loaded · demo pattern (seed 42) · pick a MIDI out below';
+  $('status').hidden=false;
 }
 boot().catch(e=>{
   const st=document.getElementById('status');
