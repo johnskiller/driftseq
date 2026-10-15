@@ -192,18 +192,18 @@ function drawGrid(){
     const rel=(s+64-start)&63, inWin=rel<len;
     const on=stepU8(selTrack,s,'on')&&stepU8(selTrack,s,'nvoices');
     const nv=stepU8(selTrack,s,'nvoices');
-    const v0=stepU8(selTrack,s,'voices');
+    const vBase=trkOff(selTrack)+TK.steps+s*ST.size;           // voices[] = ds_note v[4]
     // hue = pitch (12-semitone wheel, piano-roll convention). Drums too: GM note
     // numbers cluster arbitrarily (36/38/42/46...), so raw pitch hue is meaningless
     // — map through the emu's drum-key palette index instead (instrument = identity).
     let fill;
     if(on){
-      const n0v=(v0===0xFF?0:v0);
+      const v0n=H8[S+vBase];                                   // v[0].note
       if(isDrum){
-        const gi=GM_DRUMS.indexOf(n0v);
+        const gi=GM_DRUMS.indexOf(v0n);
         fill=DPAL[(gi>=0?gi:0)%DPAL.length];
       } else {
-        fill=`hsl(${n0v%12*30},70%,55%)`;
+        fill=`hsl(${v0n%12*30},70%,55%)`;
       }
       if(!inWin) fill='#555560';                 // outside loop window: greyed, still visible
     } else fill=(r===page)?'#1d1d26':'#15151a';
@@ -212,8 +212,8 @@ function drawGrid(){
     ctx.fillRect(x+1,y+1,cw-2,chh-2);
     if(on&&!isDrum){                             // v1..3 stack: 3px hue strips at cell bottom
       for(let vi=1;vi<Math.min(nv,4);vi++){
-        const vn=stepU8(selTrack,s,'voices');
-        ctx.fillStyle=`hsl(${(vn===0xFF?0:vn)%12*30},70%,55%)`;
+        const vn=H8[S+vBase+vi*4];               // v[vi].note (ds_note = 4 bytes)
+        ctx.fillStyle=`hsl(${vn%12*30},70%,55%)`;
         ctx.fillRect(x+1,y+chh-2-vi*3,cw-2,2);
       }
     }
