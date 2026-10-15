@@ -243,6 +243,7 @@ function refreshMidi(){
   navigator.requestMIDIAccess({sysex:false}).then(acc=>{
     midiAccess=acc;
     acc.onstatechange=()=>refreshMidi();            // hot-plug: a device appearing refreshes
+    bindMidiIn(acc);
     const sel=$('midiouts'); if(!sel) return;
     const outs=[...acc.outputs.values()];
     const prev=midiOut?midiOut.id:null;
@@ -260,6 +261,49 @@ function refreshMidi(){
     sel.value=midiOut.id;
     if(st) st.textContent=outs.length+' out(s) ready';
   },e=>{ if(st) st.textContent='WebMIDI denied'; });
+}
+
+/* ---------- WebMIDI in: the FM-1 hardware drives this page (fm1-ctrl map) ----------
+ * fm1-ctrl firmware (docs/maps/melodee.json v0.2, keyscan.c/encoders.c):
+ *   notes  53..79  ch1  -> 27 keys F3..G5 (vel 100, 0x80 on release)
+ *   CC 40..53 ch1  -> 14 buttons FX SEL ENV LFO EDIT GLO HOME SAVE ARP SEQ PLAY REC OCT- OCT+ (127/0)
+ *   CC 20..26 ch1  -> encoders SELECT ALGORITHM PRESETS K1..4, relative 64±n
+ *   CC 20..26 ch2  -> push+turn (second layer, 0xB1)
+ *   CC 27          -> MASTER (abs 0..127)                                        */
+const BTN_CC0=40, ENC_CC0=20;
+const keyStates=new Set();                       // notes currently held from hardware
+function noteToKeyIdx(note){ return note-53; }   // key idx 0..26
+function midiIn3(st,d1,d2){
+  const t=st&0xF0, ch=st&0x0F;
+  if(t===0x90&&d2>0){                            // key down
+    const i=noteToKeyIdx(d1);
+    if(i>=0&&i<27&&!keyStates.has(d1)){ keyStates.add(d1); DSPanel.keyDown(i); }
+  } else if(t===0x80||(t===0x90&&d2===0)){       // key up
+    const i=noteToKeyIdx(d1);
+    if(i>=0&&i<27&&keyStates.delete(d1)) DSPanel.keyUp(i);
+  } else if(t===0xB0){
+    const v=d2||0;
+    if(d1>=BTN_CC0&&d1<BTN_CC0+14){              // button press/release, bit = cc-40
+      const bit=d1-BTN_CC0;
+      if(v>=64) DSPanel.btnDown(bit); else DSPanel.btnUp(bit);
+    } else if(ch===0&&d1>=ENC_CC0&&d1<ENC_CC0+7){        // encoder turn, relative 64±n
+      DSPanel.turnRole(d1-ENC_CC0, v-64);
+    } else if(ch===1&&d1>=ENC_CC0&&d1<ENC_CC0+7){        // push+turn layer
+      DSPanel.turnRole(d1-ENC_CC0, v-64);
+    } else if(d1===27){                          // MASTER (absolute)
+      DSPanel.masterVol(v);
+    }
+  }
+}
+function bindMidiIn(acc){
+  for(const inp of acc.inputs.values()){
+    inp.onmidimessage=(e)=>{
+      const d=e.data;
+      if(!d||d.length<2||d[0]>=0xF0) return;     // ignore realtime/system
+      // swallow echo of our own out stream only if it came back on an input we didn't choose — keep simple: accept all
+      midiIn3(d[0],d[1],d[2]||0);
+    };
+  }
 }
 
 let page=0, started=false;
