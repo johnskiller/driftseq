@@ -264,28 +264,35 @@ function drawDrumGrid(){
 /* ---------- step-entry (02-input v1): key press writes the cursor step ---------- */
 let cursor=0;                                    // absolute step 0..63
 const liveHeld=new Set();                        // panel keys currently sounding (note-off dedup)
+/* Key id → is it a black key? panel.js key ids are CHROMATIC (0..26 = F3..G5), NOT
+ * "white 0..15 then black 16..26". Whites = [0,2,4,6,7,9,11,12,14,16,18,19,21,23,24,26],
+ * blacks = [1,3,5,8,10,13,15,17,20,22,25]. John's report ("black key toggles step 2")
+ * came from treating id>=16 as black — id16 is actually a WHITE key (C5)! */
+const KEY_BLACK=new Set([1,3,5,8,10,13,15,17,20,22,25]);
+const KEY_BLACK_IDX=[1,3,5,8,10,13,15,17,20,22,25];   // array form for ordinal lookup
+const KEY_WHITE=[0,2,4,6,7,9,11,12,14,16,18,19,21,23,24,26];
+const WHITE_POS=k=>KEY_WHITE.indexOf(k);         // white key ordinal 0..15 = step in page
 /* Drum GRID editing (spec 02 §2.1 / 03 §2.3): black keys = pick instrument, white keys =
  * toggle that drum across the 16 steps of the keybed page. TR-808 muscle memory. */
 let drumSel=0;                                   // index into GM_DRUMS (black-key order)
 const GM_SHORT=['KCK','SNR','CHH','OHH','CUP','TOM','RID','PERC','SHK','CAB','MAR'];
 function drumKeyHandler(pressed,down,released){
   const t=selTrack, inGrid=mode==='grid';
-  const black=GM_DRUMS.length;                   // key id >= blackStart => black key
   for(const k of (pressed||[])){
-    if(k>=16){                                   // black key: pick drum (audition, light LED)
-      drumSel=Math.min(k-16,GM_DRUMS.length-1);
+    if(KEY_BLACK.has(k)){                        // black key: pick drum (audition, light LED)
+      drumSel=KEY_BLACK_IDX.indexOf(k);          // black-key order = instrument order
       liveNote(k,true);                          // hear it
     } else if(inGrid){
-      const s=page*16+k;                         // white key = toggle drumSel at this step
+      const s=page*16+WHITE_POS(k);              // white key ordinal = step in page
       const vBase=trkOff(t)+TK.steps+s*ST.size;
       let hit=-1;
       for(let vi=0;vi<stepU8(t,s,'nvoices');vi++) if(H8[S+vBase+vi*4]===GM_DRUMS[drumSel]) hit=vi;
       if(hit>=0) M._ds_voice_remove_wasm(t,s,GM_DRUMS[drumSel]);   // engine removes by note
       else M._ds_voice_add_wasm(t,s,GM_DRUMS[drumSel],100,1);
-      liveNote(16+drumSel,true);                 // audition via the black key's note
+      liveNote(KEY_BLACK[drumSel],true);         // audition via that drum's black key note
     } else liveNote(k,true);                     // non-grid (step-entry/PLAY): melodic path
   }
-  for(const k of (released||[])) if(k>=16||!inGrid) liveNote(k,false);
+  for(const k of (released||[])) if(KEY_BLACK.has(k)||!inGrid) liveNote(k,false);
 }
 
 function liveNote(keyIdx,down){                  // panel key -> live preview note through the engine
