@@ -182,6 +182,10 @@ function drawGrid(){
   ctx.fillText(`SEQ TRK ${selTrack+1} · p${page+1}/4`,6,14);
   ctx.fillStyle= trkU8(selTrack,'mute')?'#5a5a62':'#5fe08a';
   ctx.fillText(`st${cursor}${nm}`,186,14);
+  if(keyShift!==0){                              // rev.7: keyboard shift indicator (GRID only)
+    ctx.fillStyle='#e6c84a';
+    ctx.fillText(`${keyShift>0?'+':''}${keyShift}`,150,14);
+  }
   const cols=16,rows=4, cw=(CH-28)/cols, chh=(CH-60)/rows;
   const start=trkU8(selTrack,'loop_start'), len=trkU8(selTrack,'loop_len');
   const isDrum=trkU8(selTrack,'channel')===9;
@@ -298,10 +302,10 @@ function drumKeyHandler(pressed,down,released){
 function liveNote(keyIdx,down){                  // panel key -> live preview note through the engine
   const t=selTrack;
   let note;
-  if(trkU8(t,'channel')===9){                    // drums: fixed GM map
+  if(trkU8(t,'channel')===9){                    // drums: fixed GM map (OCT shift meaningless)
     const gm=[36,38,42,46,49,45,41,43,51,47,39,56,37,54,40,58,62,63,27,34];
     note=gm[keyIdx%gm.length];
-  } else note=53+keyIdx;                         // F3 = 53
+  } else note=Math.max(0,Math.min(127,53+keyIdx+keyShift));   // F3 = 53, + keyShift (rev.7)
   const key='k'+t+':'+note;
   if(down){ M._ds_live_on_wasm(t,note,100); liveHeld.add(key); }
   else{
@@ -317,7 +321,8 @@ function stepEntry(pressed,down,released){
   if(((cursor+64-start)&63)>=len) cursor=start;   // resync into the window
   for(const keyIdx of (pressed||[])){
     liveNote(keyIdx,true);                        // hear it now
-    const note = trkU8(t,'channel')===9 ? [36,38,42,46,49,45,41,43,51,47,39,56,37,54,40,58,62,63,27,34][keyIdx%20] : 53+keyIdx;
+    let note = trkU8(t,'channel')===9 ? [36,38,42,46,49,45,41,43,51,47,39,56,37,54,40,58,62,63,27,34][keyIdx%20] : 53+keyIdx;
+    note=Math.max(0,Math.min(127,note+keyShift)); // rev.7: OCT± shifts the written pitch (F3–G5 constraint)
     M._ds_voice_add_wasm(t,cursor,note,100,1);
   }
   for(const keyIdx of (released||[])) liveNote(keyIdx,false);   // key up -> note-off
@@ -335,7 +340,14 @@ function cursorMove(n){                          // n = detents (+ fwd / - back)
   const step=(gloHeld?16:1)*(n>0?1:-1)*Math.abs(n);
   cursor=(start+(((cursor+64-start)+step)%len+len)%len)&63;   // stay inside the window
 }
-function restTieCycle(){                         // OCT+ on the cursor step: none→rest→tie→none
+/* ---------- rev.7: OCT± = keyboard interval shift while in GRID (John: the F3–G5
+ * keybed is only ~2 octaves — OCT must shift the write pitch, not flip pages) ---------- */
+let keyShift=0;                                  // semitones added to written/auditioned notes (±12/±24)
+function octShift(dir){                          // dir = ±1 → ±12; clamp at ±24
+  const next=keyShift+dir*12;
+  if(next>=-24&&next<=24) keyShift=next;
+}
+function restTieCycle(){                         // EDIT page GLO+K4: none→rest→tie→none
   const t=selTrack, s=cursor;
   const cur=restState.get(s)||0;
   const next=(cur+1)%3;                          // 0 none, 1 rest, 2 tie
@@ -466,8 +478,8 @@ function panelButton(ev){
       case 'EDIT': mode=(mode==='edit')?'grid':'edit'; break;   // EDIT toggle (03 §3.1)
       case 'ARP': mode='home'; break;               // v1: no Euclid page yet
       case 'GLO': gloHeld=true; break;               // modifier: rest of this down-mask = shifted
-      case 'OCT-': page=(page+3)&3; break;
-      case 'OCT+': restTieCycle(); break;            // GRID: rest/tie 3-state on cursor (rev.4)
+      case 'OCT-': octShift(-1); break;              // GRID: keyboard shift −12 (rev.7); EDIT: cursor−
+      case 'OCT+': if(mode==='edit'){cursor=(cursor+63)&63;} else octShift(+1); break;
       case 'REC': M._ds_toggle_step_wasm(selTrack,cursor); break;  // v1: REC=cursor toggle
       case 'HOME': mode = mode==='home'?'grid':'home'; page=0; break;
       case 'PLAY': break;                              // handled on release edge (toggle)
@@ -524,7 +536,8 @@ function panelEnc(role,n){
       const v=H8[S+vBase+av*4+1];
       M._ds_note_set_wasm(t,s,av,-1,Math.max(1,Math.min(127,v+n)),-1); return;
     }
-    if(role===6){                                           // K4 PROB (step-level)
+    if(role===6){                                           // K4 PROB (GLO held = rest/tie 3-state, rev.7)
+      if(gloHeld){ restTieCycle(); return; }
       const p=stepU8(t,s,'prob');
       H8[S+stepOff(t,s)+ST.prob]=Math.max(0,Math.min(100,p+n*5)); return;
     }
