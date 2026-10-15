@@ -15,6 +15,25 @@ const ctx=$('screen').getContext('2d');
 const mon=$('mon');
 let monCount=0;
 
+/* crash beacon: POST any uncaught error back to the dev server so the box-side log
+ * captures it (server writes crash.log in web/) — survives even a dead rAF loop */
+let lastBeacon=0, lastBeaconMsg='';
+function crashBeacon(msg){
+  try{
+    const txt=String(msg).slice(0,300);
+    monCount++;
+    mon.innerHTML=`<span class="t">CRASH</span> ${txt.slice(0,120)}`;
+    const now=performance.now();
+    if(txt!==lastBeaconMsg || now-lastBeacon>2000){   // rate-limit: same error max 1 line / 2s
+      lastBeacon=now; lastBeaconMsg=txt;
+      const body=new Date().toISOString()+' '+txt+'\n';
+      navigator.sendBeacon
+        ? navigator.sendBeacon('/crash-beacon', new Blob([body],{type:'text/plain'}))
+        : fetch('/crash-beacon',{method:'POST',body,keepalive:true});
+    }
+  }catch(_){}
+}
+
 function monEvent(bytes){
   if(!bytes||!bytes.length) return;
   monCount++;
@@ -185,8 +204,10 @@ function frame(t){
   if(!lastT)lastT=t;
   let dt=(t-lastT)/1000; lastT=t;
   if(dt>0.25)dt=0.25;
-  M._ds_tick_wasm(dt); readMidiOut();            // tick always: live note-offs must drain even when stopped
-  if(mode==='home')drawHome(); else drawGrid();
+  try{
+    M._ds_tick_wasm(dt); readMidiOut();          // tick always: live note-offs must drain even when stopped
+    if(mode==='home')drawHome(); else drawGrid();
+  }catch(e){ crashBeacon('frame: '+e.message); lastT=0; }  // log it; next rAF retries
   rafId=requestAnimationFrame(frame);
 }
 
@@ -322,18 +343,9 @@ function ensureAudio(){
   started=true;
 }
 
-/* crash guard: any uncaught error surfaces in the mini monitor (page keeps running) */
-addEventListener('error',e=>{
-  try{ monEvent([0xF0]); }catch(_){}
-  const mon=$('mon');
-  if(mon) mon.innerHTML=`<span class="t">CRASH</span> ${String(e.message||e.error).slice(0,120)}`;
-  console.error(e.error||e.message);
-});
-addEventListener('unhandledrejection',e=>{
-  const mon=$('mon');
-  if(mon) mon.innerHTML=`<span class="t">CRASH</span> ${(String(e.reason&&(e.reason.message||e.reason))).slice(0,120)}`;
-  console.error('unhandled rejection:', e.reason);
-});
+/* crash guard: any uncaught error surfaces in the mini monitor + beacons back to server */
+addEventListener('error',e=>{ crashBeacon(e.message||e.error); console.error(e.error||e.message); });
+addEventListener('unhandledrejection',e=>{ crashBeacon('promise: '+(e.reason&&(e.reason.message||e.reason))); console.error('unhandled rejection:', e.reason); });
 
 /* ---------- boot ---------- */
 async function boot(){
