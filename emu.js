@@ -107,14 +107,24 @@ function drawHome(){
   ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
   ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,20);
   ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
-  ctx.fillText(`DriftSeq  ${Math.round(f64(OFF.bpm))} BPM  ${playing?'PLAY':'STOP'}`,6,14);
+  const routeG=()=> 'U';                                     // v1: all-USB routing (spec 01 §route)
+  ctx.fillText(`TRK 03 │ PTN 01 │ ${Math.round(f64(OFF.bpm))} │ ${playing?'PLAY':'GRID'}`,6,14);
   ctx.fillStyle='#7fd94a';
   ctx.fillText(`TRK ${String(selTrack+1).padStart(2,'0')}`,196,14);
-  const barH=11, gapY=1, x0=28, x1=232, w=x1-x0;
+  const barH=11, gapY=1, x0=56, x1=232, w=x1-x0;             // left gutter: TRK LEN R [M]
+  ctx.font='9px monospace';
   for(let t=0;t<TRACKS;t++){
     const y=24+t*(barH+gapY);
     const muted=trkU8(t,'mute');
     const start=trkU8(t,'loop_start'), len=trkU8(t,'loop_len');
+    // left gutter: TRK nn | LEN nn | route | M
+    ctx.fillStyle= muted?'#5a5a62':'#9a9aa8';
+    ctx.fillText(String(t+1).padStart(2,'0'),4,y+9);
+    ctx.fillStyle= muted?'#4a4a52':'#6a6a78';
+    ctx.fillText(String(len).padStart(2,'0'),30,y+9);
+    ctx.fillStyle= muted?'#4a4a52':'#7a7a88';
+    ctx.fillText(routeG(t),46,y+9);
+    if(muted){ ctx.fillStyle='#e0a040'; ctx.fillText('M',48,y+9); }
     ctx.fillStyle= muted?'#141418':'#1d1d26';
     ctx.fillRect(x0,y,w,barH);
     if(!muted){
@@ -149,7 +159,7 @@ function drawHome(){
   }
   ctx.fillStyle='#181820'; ctx.fillRect(0,220,CH,20);
   ctx.fillStyle='#8a8a99'; ctx.font='10px monospace';
-  ctx.fillText('K1 LEN  K2 MUTE  K3 START  K4 PROB',6,233);
+  ctx.fillText('K1 LEN   K2 MUTE   K3 START   K4 PROB',6,233);
 }
 
 /* ---------- the screen: SEQ grid (03-screens) ---------- */
