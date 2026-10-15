@@ -282,21 +282,22 @@ function refreshMidi(){
   if(!navigator.requestMIDIAccess){ if(st) st.textContent='WebMIDI unavailable (Chrome/Edge)'; return; }
   navigator.requestMIDIAccess({sysex:false}).then(acc=>{
     midiAccess=acc;
-    acc.onstatechange=()=>refreshMidi();            // hot-plug: a device appearing refreshes
+    acc.onstatechange=(e)=>{                        // hot-plug; skip echo-of-our-own-change events
+      if(e.target===midiAccess && e.port && e.port.connection==='open') return;
+      refreshMidi();
+    };
     bindMidiIn(acc);
     const sel=$('midiouts'); if(!sel) return;
     const outs=[...acc.outputs.values()];
-    const prev=midiOut?midiOut.id:null;
-    sel.innerHTML='<option value="">— none (beeps only, no loop) —</option>';
-    if(!outs.length){
-      if(st) st.textContent='no outputs found';
-      midiOut=null;
-      return;
+    const prev=midiOut?midiOut.id:'';
+    const sig=outs.map(o=>o.id+':'+o.name).join('|');
+    if(sel.dataset.sig!==sig){                     // rebuild only on real port-list changes
+      sel.dataset.sig=sig;
+      sel.innerHTML='<option value="">— none (beeps only, no loop) —</option>';
+      for(const o of outs){ const op=document.createElement('option'); op.value=o.id; op.textContent=o.name; sel.appendChild(op); }
     }
-    for(const o of outs){ const op=document.createElement('option'); op.value=o.id; op.textContent=o.name; sel.appendChild(op); }
     sel.onchange=()=>{ midiOut=outs.find(o=>o.id===sel.value)||null; if(midiOut) monEvent([0xF6]); };
-    // keep the previous choice if still present; default is NONE (the IAC loop lesson)
-    midiOut=outs.find(o=>o.id===prev)||null;
+    midiOut=outs.find(o=>o.id===prev)||null;       // keep choice if still present; default none
     sel.value=midiOut?midiOut.id:'';
     if(st) st.textContent=outs.length+' out(s) ready';
   },e=>{ if(st) st.textContent='WebMIDI denied'; });
@@ -353,13 +354,20 @@ function bindMidiIn(acc){
   const ins=[...acc.inputs.values()];
   const sel=$('midiins');
   if(sel){
-    const prev=midiInId;
-    sel.innerHTML='<option value="all">— all inputs —</option>';
-    for(const i of ins){ const op=document.createElement('option'); op.value=i.id; op.textContent=i.name; sel.appendChild(op); }
-    sel.value=[...sel.options].some(o=>o.value===prev)?prev:'all';
-    sel.onchange=()=>{ midiInId=sel.value; bindMidiIn(acc); };
+    const sig=ins.map(i=>i.id+':'+i.name).join('|');
+    if(sel.dataset.sig!==sig){                     // rebuild ONLY when the port list changed —
+      sel.dataset.sig=sig;                         // never mid-interaction (Chrome reverts the
+      const prev=midiInId;                         // native popup if options mutate on change)
+      sel.innerHTML='<option value="all">— all inputs —</option>';
+      for(const i of ins){ const op=document.createElement('option'); op.value=i.id; op.textContent=i.name; sel.appendChild(op); }
+      sel.value=[...sel.options].some(o=>o.value===prev)?prev:'all';
+    }
+    sel.onchange=()=>{ midiInId=sel.value; bindMidiHandlers(acc); };   // rebind bytes only, DOM untouched
   }
-  for(const i of ins){
+  bindMidiHandlers(acc);
+}
+function bindMidiHandlers(acc){
+  for(const i of acc.inputs.values()){
     const want = midiInId==='all' || i.id===midiInId;
     i.onmidimessage = want ? (e)=>{
       const d=e.data;
