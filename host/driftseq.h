@@ -92,6 +92,10 @@ typedef struct {
     /* MIDI out byte stream (deterministic contract, 01 §7) */
     uint8_t     out[4096];
     uint32_t    out_len;
+
+    /* live keyboard (step-entry preview): small pool of held notes */
+    struct { uint8_t trk, note; double t; } live[16];
+    uint8_t     live_n;
 } ds_state;
 
 /* rng */
@@ -112,6 +116,11 @@ void     ds_set_bpm(ds_state *s, double bpm);
  * advances time, fills s->out with MIDI bytes for this tick, resets out_len.
  * deterministic: same state + same inputs -> same bytes. */
 void     ds_tick(ds_state *s, double dt_seconds);
+
+/* live keyboard: direct note on/off through the same out stream (step-entry
+ * preview). held notes get a scheduled note-off after gate_steps * cell time. */
+int      ds_live_on(ds_state *s, uint8_t trk, uint8_t note, uint8_t vel);
+int      ds_live_off(ds_state *s, uint8_t trk, uint8_t note);
 
 /* editing helpers (used by UI / tests) */
 int      ds_voice_add(ds_track *t, uint32_t step, uint8_t note, uint8_t vel, uint8_t gate);

@@ -131,3 +131,19 @@ EMSCRIPTEN_KEEPALIVE
 int ds_trk_off_eu_k(void)    { ds_track t; return (int)((uintptr_t)&t.eu_k - (uintptr_t)&t); }
 EMSCRIPTEN_KEEPALIVE
 int ds_trk_off_eu_n(void)    { ds_track t; return (int)((uintptr_t)&t.eu_n - (uintptr_t)&t); }
+
+/* ---- live keyboard (step-entry preview + held notes) ---- */
+/* notes held via the panel keyboard: engine emits note-offs when the gate
+ * expires (ds_live_tick) or when ds_live_all_off is called (STOP / window). */
+EMSCRIPTEN_KEEPALIVE
+int ds_live_on_wasm(int trk, int note, int vel) {
+    if (trk < 0 || trk >= DS_TRACKS || note < 0 || note > 127) return -3;
+    return ds_live_on(&g, (uint8_t)trk, (uint8_t)note, (uint8_t)vel);
+}
+EMSCRIPTEN_KEEPALIVE
+int ds_live_off_wasm(int trk, int note) {
+    if (trk < 0 || trk >= DS_TRACKS) return -3;
+    return ds_live_off(&g, (uint8_t)trk, (uint8_t)note);
+}
+EMSCRIPTEN_KEEPALIVE
+int ds_live_pending(void) { return (int)g.live_n; }

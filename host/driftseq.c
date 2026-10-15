@@ -81,6 +81,40 @@ void ds_stop(ds_state *s) {
         s->out[s->out_len++] = 123;
         s->out[s->out_len++] = 0;
     }
+    s->live_n = 0;                                   /* held step-entry notes die with the transport */
+}
+
+/* ---- live keyboard ---- */
+int ds_live_on(ds_state *s, uint8_t trk, uint8_t note, uint8_t vel) {
+    int i;
+    if (s->out_len + 3 > sizeof s->out) return -1;
+    s->out[s->out_len++] = 0x90 | (s->pat.track[trk].channel & 0x0F);
+    s->out[s->out_len++] = note;
+    s->out[s->out_len++] = vel;
+    for (i = 0; i < s->live_n; i++)
+        if (s->live[i].trk == trk && s->live[i].note == note) { s->live[i].t = 0; return 0; }
+    if (s->live_n >= 16) return -2;                  /* pool full: oldest is dropped by caller policy */
+    s->live[s->live_n].trk = trk; s->live[s->live_n].note = note; s->live[s->live_n].t = 0;
+    s->live_n++;
+    return 0;
+}
+int ds_live_off(ds_state *s, uint8_t trk, uint8_t note) {
+    int i, j, held = 0;
+    for (i = 0; i < s->live_n; i++)
+        if (s->live[i].trk == trk && s->live[i].note == note) { held = 1; break; }
+    if (!held) return 0;                             /* stale: auto gate already sent the note-off */
+    if (s->out_len + 3 > sizeof s->out) return -1;
+    s->out[s->out_len++] = 0x80 | (s->pat.track[trk].channel & 0x0F);
+    s->out[s->out_len++] = note;
+    s->out[s->out_len++] = 0;
+    for (i = 0; i < s->live_n; i++) {
+        if (s->live[i].trk == trk && s->live[i].note == note) {
+            for (j = i; j + 1 < s->live_n; j++) s->live[j] = s->live[j + 1];
+            s->live_n--;
+            break;
+        }
+    }
+    return 1;
 }
 void ds_set_bpm(ds_state *s, double bpm) { if (bpm >= 20.0 && bpm <= 300.0) s->bpm = bpm; }
 
@@ -198,8 +232,23 @@ static void land(ds_state *s, ds_track *t, int trk, uint32_t pos) {
 }
 
 void ds_tick(ds_state *s, double dt_seconds) {
-    int trk;
-    if (!s->playing) { s->out_len = 0; return; }
+    int trk, i;
+    int live_emitted = 0;
+    /* live held notes: schedule note-off after ~2 cells of the track's division.
+     * note-offs are appended to out[]; JS drains out every tick even when
+     * stopped, so key-offs land regardless of transport state. When stopped we
+     * must NOT reset out_len on a tick that emitted a note-off (it would be
+     * wiped before JS drains it) — only on quiet ticks. */
+    if (s->live_n) {
+        const uint32_t keep = s->out_len;
+        for (i = (int)s->live_n - 1; i >= 0; i--) {
+            s->live[i].t += dt_seconds;
+            if (s->live[i].t >= 2.0 * cell_seconds(s->bpm, s->pat.track[s->live[i].trk].division))
+                ds_live_off(s, s->live[i].trk, s->live[i].note);
+        }
+        live_emitted = (s->out_len > keep);
+    }
+    if (!s->playing) { if (!live_emitted) s->out_len = 0; return; }
     s->out_len = 0;
 
     for (trk = 0; trk < DS_TRACKS; trk++) {
