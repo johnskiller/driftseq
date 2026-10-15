@@ -49,6 +49,11 @@ function monEvent(bytes){
   mon.innerHTML=`<span class="t">${stamp}</span> ${txt}`;
 }
 
+/* GM drum kit notes the emu's live keybed can write (see liveNote) + common extras.
+ * DPAL color = instrument identity: same note always same color everywhere. */
+const GM_DRUMS=[36,38,42,46,49,45,41,43,51,47,39,56,37,54,40,58,62,63,27,34];
+const DPAL=['#e05c5c','#e08b3c','#d9c94a','#7fd94a','#4ad9a8','#4ac5d9','#5c7fe0','#9a5ce0','#e05ca8','#e05c7f','#c9d96b','#8a6bd9'];
+
 const COLORS=[
   '#e05c5c','#e08b3c','#d9c94a','#7fd94a','#4ad9a8','#4ac5d9','#5c7fe0','#9a5ce0',
   '#e05ca8','#e05c7f','#d98a6b','#c9d96b','#6bd9c9','#8a6bd9','#d96b9a','#9ad96b'];
@@ -188,14 +193,17 @@ function drawGrid(){
     const on=stepU8(selTrack,s,'on')&&stepU8(selTrack,s,'nvoices');
     const nv=stepU8(selTrack,s,'nvoices');
     const v0=stepU8(selTrack,s,'voices');
-    // hue = pitch (12-semitone wheel, piano-roll convention); drums = instrument palette
+    // hue = pitch (12-semitone wheel, piano-roll convention). Drums too: GM note
+    // numbers cluster arbitrarily (36/38/42/46...), so raw pitch hue is meaningless
+    // — map through the emu's drum-key palette index instead (instrument = identity).
     let fill;
     if(on){
+      const n0v=(v0===0xFF?0:v0);
       if(isDrum){
-        const DPAL=['#e05c5c','#e08b3c','#e0d04a','#c98850','#e05ca8','#4ad9a8','#6bd9c9','#9a5ce0','#4a7fd9','#d9c94a','#8a6bd9','#5fd95c'];
-        fill=DPAL[(v0===0xFF?0:v0)%DPAL.length];
+        const gi=GM_DRUMS.indexOf(n0v);
+        fill=DPAL[(gi>=0?gi:0)%DPAL.length];
       } else {
-        fill=`hsl(${(v0===0xFF?0:v0)%12*30},70%,55%)`;
+        fill=`hsl(${n0v%12*30},70%,55%)`;
       }
       if(!inWin) fill='#555560';                 // outside loop window: greyed, still visible
     } else fill=(r===page)?'#1d1d26':'#15151a';
