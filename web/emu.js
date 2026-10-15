@@ -169,22 +169,55 @@ function drawGrid(){
   ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
   ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,20);
   ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
-  ctx.fillText(`SEQ  TRK ${selTrack+1}  page ${page+1}/4  steps ${page*16}-${page*16+15}`,6,14);
-  const cols=16,rows=4, cw=(CH-8)/cols, chh=(CH-60)/rows;
+  // top-right corner: cursor step + v0 note name (HOME uses this syntax for S nn)
+  const st0=stepU8(selTrack,cursor,'voices'), n0=(st0===0xFF)?null:st0;
+  const NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const nm = n0===null?'':` ${NAMES[n0%12]}${Math.floor(n0/12)-1}`;
+  ctx.fillText(`SEQ TRK ${selTrack+1} · p${page+1}/4`,6,14);
+  ctx.fillStyle= trkU8(selTrack,'mute')?'#5a5a62':'#5fe08a';
+  ctx.fillText(`st${cursor}${nm}`,186,14);
+  const cols=16,rows=4, cw=(CH-28)/cols, chh=(CH-60)/rows;
   const start=trkU8(selTrack,'loop_start'), len=trkU8(selTrack,'loop_len');
+  const isDrum=trkU8(selTrack,'channel')===9;
+  ctx.font='9px monospace';
   for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
-    const s=page*16+r*16+c;
-    const x=4+c*cw, y=24+r*chh;
+    const s=page*0+r*16+c;                       // full overview: row = page, all 64 visible
+    const x=18+c*cw, y=24+r*chh;
+    const lit=(r===page)?1:0.45;                 // current keybed page row full-lit, others dimmed
     const rel=(s+64-start)&63, inWin=rel<len;
     const on=stepU8(selTrack,s,'on')&&stepU8(selTrack,s,'nvoices');
-    const pos=i32(OFF.pos16+selTrack*4), isNow=playing&&pos===s;
-    ctx.fillStyle= on? (inWin?COLORS[selTrack]:'#333') : (inWin?'#1d1d26':'#121216');
+    const nv=stepU8(selTrack,s,'nvoices');
+    const v0=stepU8(selTrack,s,'voices');
+    // hue = pitch (12-semitone wheel, piano-roll convention); drums = instrument palette
+    let fill;
+    if(on){
+      if(isDrum){
+        const DPAL=['#e05c5c','#e08b3c','#e0d04a','#c98850','#e05ca8','#4ad9a8','#6bd9c9','#9a5ce0','#4a7fd9','#d9c94a','#8a6bd9','#5fd95c'];
+        fill=DPAL[(v0===0xFF?0:v0)%DPAL.length];
+      } else {
+        fill=`hsl(${(v0===0xFF?0:v0)%12*30},70%,55%)`;
+      }
+      if(!inWin) fill='#555560';                 // outside loop window: greyed, still visible
+    } else fill=(r===page)?'#1d1d26':'#15151a';
+    ctx.globalAlpha=lit;
+    ctx.fillStyle=fill;
     ctx.fillRect(x+1,y+1,cw-2,chh-2);
+    if(on&&!isDrum){                             // v1..3 stack: 3px hue strips at cell bottom
+      for(let vi=1;vi<Math.min(nv,4);vi++){
+        const vn=stepU8(selTrack,s,'voices');
+        ctx.fillStyle=`hsl(${(vn===0xFF?0:vn)%12*30},70%,55%)`;
+        ctx.fillRect(x+1,y+chh-2-vi*3,cw-2,2);
+      }
+    }
+    const pos=i32(OFF.pos16+selTrack*4), isNow=playing&&pos===s;
     if(isNow){ctx.strokeStyle='#fff';ctx.strokeRect(x+1.5,y+1.5,cw-3,chh-3);}
-    if(stepU8(selTrack,s,'prob')<100&&on){ctx.fillStyle='#000';ctx.globalAlpha=.35;ctx.fillRect(x+1,y+chh-6,cw-2,4);ctx.globalAlpha=1;}
+    if(cursor===s){ctx.strokeStyle='#e6c84a';ctx.strokeRect(x+0.5,y+0.5,cw-1,chh-1);}
+    if(stepU8(selTrack,s,'prob')<100&&on){ctx.fillStyle='#000';ctx.globalAlpha=.35*lit;ctx.fillRect(x+1,y+chh-7,cw-2,4);}
+    ctx.globalAlpha=1;
+    if(c===0){ctx.fillStyle='#8a8a99';ctx.fillText(`P${r+1}`,3,y+11);}   // row = page label
   }
   ctx.fillStyle='#8a8a99'; ctx.font='10px monospace';
-  ctx.fillText('OCT: page · keys play into cursor · K1-K4 step params',6,233);
+  ctx.fillText('K1 START  K2 LEN  K3 DIV  K4 CH',18,233);
 }
 
 /* ---------- step-entry (02-input v1): key press writes the cursor step ---------- */
