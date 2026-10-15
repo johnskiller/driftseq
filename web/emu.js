@@ -383,9 +383,10 @@ function drawEdit(){
       const on=stepU8(t,s,'on');
       const sym=!on?'●':(playing&&i32(OFF.pos16+t*4)===s)?'▶':'○';   // ●=silent-keep ▶=sounding ○=armed
       const gn=gate===0xFF?'∞':(gate/4).toFixed(2);
-      ctx.fillText(`v${vi+1} ${sym} ${NAMES[note%12]}${Math.floor(note/12)-1} ${String(note).padStart(3,'0')}`,14,y+27);
+      ctx.fillText(`v${vi+1} ${sym} ${NAMES[note%12]}${Math.floor(note/12)-1}`,14,y+27);
       ctx.font='10px monospace'; ctx.fillStyle='#8a8a99';
-      ctx.fillText(`VEL ${vel}  GATE ${gn}`,150,y+27);
+      ctx.fillText(`${String(note).padStart(3,'0')}`,118,y+27);
+      ctx.fillText(`V${vel} G${gn}`,150,y+27);
     }
   }
   // footer: K1..K4 values for the active voice (K4 = step prob)
@@ -401,14 +402,36 @@ function drawEdit(){
     ctx.fillText(`COND ${cond+1}/11 ${COND_NAMES[cond]}`,10,231);
   } else {
     ctx.fillStyle='#d9d9e8';
-    ctx.fillText(`PITCH ${nv?('v'+vIdx):'—'}`,10,226);
-    ctx.fillText(`GATE ${aGate===0xFF?'∞':(aGate/4).toFixed(2)}`,78,226);
-    ctx.fillText(`VEL ${nv?H8[S+vBase+av*4+1]:'—'}`,150,226);
-    ctx.fillText(`PROB ${stepU8(t,s,'prob')}%`,214,226);
+    ctx.fillText(`PIT ${nv?('v'+vIdx):'—'}`,10,226);
+    ctx.fillText(`GAT ${aGate===0xFF?'∞':(aGate/4).toFixed(2)}`,62,226);
+    ctx.fillText(`VEL ${nv?H8[S+vBase+av*4+1]:'—'}`,128,226);
+    ctx.fillText(`PRB ${stepU8(t,s,'prob')}%`,186,226);
     ctx.fillStyle='#6a6a76';
-    ctx.fillText('K1 pitch K2 gate K3 vel K4 prob · SEL=voice',10,237);
+    ctx.fillText('K1 pit K2 gate K3 vel K4 prob SEL=v',10,237);
   }
   if(condZoom>0) condZoom--;
+}
+
+/* ---------- EDIT page keys (03 §3.2): black key = add voice + make active;
+ * same-note replay on the active card = remove it (STEP-ENTRY semantics reused) ---------- */
+function editKeyHandler(pressed,down,released){
+  const t=selTrack, s=cursor;
+  for(const k of (pressed||[])){
+    liveNote(k,true);                              // hear it
+    if(KEY_BLACK.has(k)){
+      const note=53+k;                             // black key pitch (F#=54 etc.)
+      const vB=trkOff(t)+TK.steps+s*ST.size+ST.voices;
+      let hit=-1;
+      for(let vi=0;vi<stepU8(t,s,'nvoices');vi++) if(H8[S+vB+vi*4]===note) hit=vi;
+      if(hit>=0) M._ds_voice_remove_wasm(t,s,note);            // same note = remove
+      else if(stepU8(t,s,'nvoices')<4){
+        M._ds_voice_add_wasm(t,s,note,100,4);
+        editVoice=stepU8(t,s,'nvoices')-1;                     // new voice becomes active
+      }
+    }
+    // white keys = audition only (no write — protect the pattern from stray fingers)
+  }
+  for(const k of (released||[])) liveNote(k,false);
 }
 
 /* ---------- main loop ---------- */
@@ -661,7 +684,8 @@ async function boot(){
   DSPanel.onKey((pressed,down,released)=>{       // drum grid edits go through the drum handler;
     if(mode==='grid' && trkU8(selTrack,'channel')===9) drumKeyHandler(pressed,down,released);
     else if(mode==='grid') stepEntry(pressed,down,released);       // melodic: step-entry is the default state (rev.5)
-    else {                                        // EDIT/PLAY pages: keys = live audition only (no writes)
+    else if(mode==='edit') editKeyHandler(pressed,down,released);  // EDIT: black key = add+activate voice
+    else {                                        // PLAY page: keys = live audition only
       for(const k of (pressed||[])) liveNote(k,true);
       for(const k of (released||[])) liveNote(k,false);
     }
