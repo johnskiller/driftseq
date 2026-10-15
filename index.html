@@ -3,69 +3,77 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DriftSeq emu — polymetric master sequencer</title>
+<title>DriftSeq — polymetric master sequencer (FM-1 emu)</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%223%22/%3E%3Crect x=%224%22 y=%224%22 width=%228%22 height=%228%22 fill=%22%23fff%22/%3E%3C/svg%3E">
 <style>
-  :root { color-scheme: dark; }
-  body { background:#101014; color:#c9c9d4; font:14px/1.45 ui-monospace,Menlo,Consolas,monospace; margin:0; display:flex; gap:18px; padding:16px; }
-  h1 { font-size:15px; margin:0 0 8px; color:#e8e8f0; }
-  #screen { border:1px solid #333; image-rendering:pixelated; width:480px; height:480px; background:#000; }
-  .col { display:flex; flex-direction:column; gap:10px; }
-  button { background:#1c1c24; color:#c9c9d4; border:1px solid #3a3a48; border-radius:4px; padding:6px 14px; font:inherit; cursor:pointer; }
-  button:hover { background:#26262f; }
-  button.on { background:#2d5a3a; border-color:#3f8a55; color:#d4ffd9; }
-  .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-  .lbl { color:#8a8a99; font-size:12px; }
-  input[type=range]{ width:140px; }
-  #log { font-size:11px; color:#7f7f8f; max-width:520px; max-height:180px; overflow:auto; }
-  a { color:#7fa8d9; }
-  .trackbtn { min-width:34px; }
-  .muted { opacity:.45; }
+:root { --bg:#8e8e93; --fg:#111; --dim:#2c2c2e; --rule:#5a5a5e;
+        --body:#1d1d1f; --tray:#141415; --part:#2a2a2d; --edge:#3a3a3e; --label:#d6d6d8;
+        --lit:#fff4d6; --green:#5fe08a; color-scheme: light; }
+html, body { background: var(--bg); }
+body { margin:0; color:var(--fg); font:13px/1.6 -apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif; }
+main { max-width:1040px; margin:0 auto; padding:24px 16px 32px; }
+a { color:inherit; }
+.device { position:relative; width:100%; aspect-ratio:1000/624; user-select:none; -webkit-user-select:none;
+          -webkit-touch-callout:none; touch-action:manipulation; }
+.device svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+.device canvas { position:absolute; image-rendering:crisp-edges; image-rendering:pixelated; background:#000; }
+.hit { position:absolute; touch-action:none; cursor:pointer; -webkit-tap-highlight-color:transparent; border-radius:10px; }
+.hit.knob { cursor:ns-resize; border-radius:50%; }
+.hit:focus-visible { outline:2px solid var(--lit); outline-offset:2px; }
+.face { transition:fill .05s; }
+.dim .face.btn { fill:#3a3934; }
+.lit .face.btn { fill:var(--lit); }
+.lit text { fill:#1d1d1f; }
+.face.key { fill:#0c0c0d; stroke:var(--edge); stroke-width:1.5; }
+.slit { fill:#3a3a3c; transition:fill .05s; }
+.dim .slit { fill:#77777b; }
+.lit .slit { fill:#ececee; filter:drop-shadow(0 0 3px rgba(255,255,255,.6)); }
+.held .face { stroke:var(--lit); stroke-width:3; }
+.latched .face { stroke:#79b8ff; stroke-width:3; }
+.start { position:absolute; inset:0; display:grid; place-content:center; justify-items:center; gap:12px;
+         background:rgba(0,0,0,.5); border-radius:4%/6%; }
+.start[hidden] { display:none; }
+.start button { font:inherit; font-size:18px; padding:12px 28px; background:#fff; color:#000; border:0; cursor:pointer; }
+.start button:disabled { opacity:.4; cursor:progress; }
+.start p { margin:0; max-width:32em; text-align:center; color:#fff; }
+#mon { max-width:1040px; margin:10px auto 0; padding:6px 10px; background:var(--tray); color:#9fd9b0;
+       font:11px/1.5 ui-monospace,Menlo,Consolas,monospace; border-radius:8px; min-height:1.5em;
+       overflow:hidden; white-space:nowrap; text-overflow:clip; }
+#mon .t { color:#5a6a5e; }
+.keys, footer { margin:16px 0 0; color:var(--dim); text-align:center; }
+.keys span { white-space:nowrap; margin:0 8px; }
+kbd { font:600 11px ui-monospace,Menlo,monospace; border:1px solid var(--rule); padding:0 4px; color:var(--fg); }
+footer { margin-top:12px; font-size:12px; }
+footer nav a { margin:0 6px; }
+footer small { font-size:11px; opacity:.8; }
 </style>
 </head>
 <body>
-<div class="col">
-  <h1>DriftSeq <span class="lbl">— 16-track polymetric, pure-C engine (wasm)</span></h1>
-  <canvas id="screen" width="240" height="240"></canvas>
-  <div class="row">
-    <button id="b_play">▶ PLAY</button>
-    <button id="b_stop">■ STOP</button>
-    <span class="lbl">BPM</span> <input id="bpm" type="range" min="40" max="240" value="120" step="1"> <span id="bpmv">120</span>
-    <span class="lbl">swing</span> <input id="sw" type="range" min="0" max="100" value="0">
-    <button id="b_grid">SEQ grid</button>
-  </div>
-  <div class="row" id="tracks"><!-- track buttons injected --></div>
-  <div class="row">
-    <span class="lbl">selected track params:</span>
-    <span class="lbl">START</span> <input id="t_start" type="range" min="0" max="63" value="0">
-    <span class="lbl">LEN</span> <input id="t_len" type="range" min="1" max="64" value="16">
-    <span class="lbl">EU K</span> <input id="t_k" type="range" min="0" max="16" value="0">
-    <span class="lbl">EU N</span> <input id="t_n" type="range" min="2" max="16" value="16">
-    <button id="b_eu">apply Euclid</button>
-    <button id="b_clear">clear track</button>
-  </div>
-  <div class="row">
-    <span class="lbl">MIDI out:</span>
-    <select id="midiouts"><option>— none (WebAudio beeps) —</option></select>
-    <button id="b_refresh">refresh</button>
-    <span class="lbl" id="webmidi-state"></span>
-  </div>
-  <div id="log">keys: space=play/stop · 1-8 select track · g=HOME/SEQ · click grid to toggle steps · drag sliders for live window morph</div>
+<main>
+<div class="device" id="device">
+  <svg id="panel" viewBox="0 0 1000 624" aria-hidden="true"></svg>
+  <canvas id="screen" width="240" height="240" role="img" aria-label="The screen"></canvas>
+  <div class="start" id="start"><button id="go" type="button">Switch on</button><p id="status" hidden></p></div>
 </div>
-<div class="col">
-  <h1>README</h1>
-  <div class="lbl" style="max-width:420px">
-    HOME hero screen: 16 horizontal bars = the 16 tracks across all 64 steps of the pattern.
-    Each bar lights from its own loop_start for loop_len steps — unequal windows &amp; divisions
-    drift apart and re-align at LCM. That visible drift is the product.
-    <br><br>
-    Drums (trk0-2, GM ch10) · bass (trk3, prog38) · lead (trk4, prog81) as the default demo.
-    Click bars in SEQ view to toggle steps; sliders morph the selected track's window live
-    (K3/K4 semantics from spec 02 §2.1). WebMIDI out when a device/DAW is connected — the byte
-    stream is the same one the FM-1 firmware will emit (golden hash 5828982717F322ED over
-    20 s of the demo, byte-identical host C and browser wasm).
-  </div>
-</div>
+<div id="mon"><span class="t">midi out</span> — press Switch on, then PLAY</div>
+<p class="keys">
+  <span><kbd>Z</kbd>–<kbd>'</kbd> <kbd>Q</kbd>–<kbd>O</kbd> keys</span>
+  <span><kbd>1</kbd>–<kbd>=</kbd> FX … REC</span>
+  <span><kbd>[</kbd> <kbd>]</kbd> OCT</span>
+  <span><kbd>↑</kbd> <kbd>↓</kbd> SELECT</span>
+  <span><kbd>←</kbd> <kbd>→</kbd> KNOB1/BPM</span>
+  <span>drag the knobs · <kbd>Shift</kbd>-click latches a button</span>
+</p>
+<footer>
+  <small>v0.1-emu</small><br>
+  DriftSeq · GPL-3.0 · page after <a href="https://github.com/johnskiller/melodee">Melodee</a>'s browser build,
+  after Hugelton's <a href="https://github.com/hugelton/Felucca">Felucca</a> and charlesvestal's X0X<br>
+  <nav><a href="https://github.com/johnskiller/driftseq">Source</a><a href="https://github.com/johnskiller/driftseq/tree/main/docs/specs">Specs</a></nav>
+  <small>M-VAVE and FM-1 are trademarks of their respective owners. DriftSeq is not affiliated with or endorsed by them.</small>
+</footer>
+</main>
 <script src="driftseq.js"></script>
+<script src="panel.js"></script>
 <script src="emu.js"></script>
 </body>
 </html>
