@@ -36,7 +36,7 @@ wasmtest: wasm
 
 gh-pages:
 	git worktree add -f /tmp/ds-pages gh-pages 2>/dev/null || git worktree add /tmp/ds-pages gh-pages
-	cp web/index.html web/emu.js web/driftseq.js web/driftseq.wasm /tmp/ds-pages/
+	cp web/index.html web/panel.js web/emu.js web/driftseq.js web/driftseq.wasm /tmp/ds-pages/
 	cd /tmp/ds-pages && git add -A && git commit -m "emu refresh $$(git log -1 --format=%h main 2>/dev/null)" || true
 
 clean:
