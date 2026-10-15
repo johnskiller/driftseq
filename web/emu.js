@@ -340,11 +340,16 @@ function restTieCycle(){                         // OCT+ on the cursor step: non
   const cur=restState.get(s)||0;
   const next=(cur+1)%3;                          // 0 none, 1 rest, 2 tie
   restState.set(s,next);
-  const gateOff=trkOff(t)+TK.steps+s*ST.size+ST.voices;      // v[0].gate (ds_note = note,vel,gate,on)
-  const velOff =gateOff+1;
+  const vB=trkOff(t)+TK.steps+s*ST.size+ST.voices;           // v[0]: note,vel,gate,on (4B stride)
   if(next===1) H8[S+stepOff(t,s)+ST.on]=0;                   // rest: en=0, voices kept
-  else if(next===2){ H8[S+gateOff]=0xFF; H8[S+velOff]=H8[S+velOff]||100; }   // tie: gate=0xFF
-  else H8[S+stepOff(t,s)+ST.on]=1;                            // restore: en back on (gate untouched)
+  else if(next===2){                                         // tie: v[0].gate = 0xFF (until next event)
+    H8[S+vB+3]=H8[S+vB+2]<0xFF?H8[S+vB+2]:H8[S+vB+3];        // save old gate in v[0].on scratch slot
+    H8[S+vB+2]=0xFF;
+  }
+  else{                                                      // restore: en back, gate to pre-cycle value
+    H8[S+stepOff(t,s)+ST.on]=1;
+    if(cur===2) H8[S+vB+2]=H8[S+vB+3]||4;                    // v[0].on is scratch here; engine re-derives
+  }
 }
 
 /* ---------- the screen: EDIT page (03 §3 rev.6) — voice cards + step params ---------- */
