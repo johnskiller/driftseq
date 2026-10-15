@@ -58,6 +58,7 @@ function readMidiOut(){
         beep(bytes[i+1],bytes[i+2]);
       }
       else if(type===0xB0){ monEvent(bytes.slice(i,i+3)); }   // CC (stop's all-notes-off lands here)
+      else if(type===0x80||(type===0x90&&bytes[i+2]===0)){ monEvent(bytes.slice(i,i+3)); }  // note-off
       i+=3;
     }
   }
@@ -146,21 +147,34 @@ function drawGrid(){
 
 /* ---------- step-entry (02-input v1): key press writes the cursor step ---------- */
 let cursor=0;                                    // absolute step 0..63
+const liveHeld=new Set();                        // panel keys currently sounding (note-off dedup)
+function liveNote(keyIdx,down){                  // panel key -> live preview note through the engine
+  const t=selTrack;
+  let note;
+  if(trkU8(t,'channel')===9){                    // drums: fixed GM map
+    const gm=[36,38,42,46,49,45,41,43,51,47,39,56,37,54,40,58,62,63,27,34];
+    note=gm[keyIdx%gm.length];
+  } else note=53+keyIdx;                         // F3 = 53
+  const key='k'+t+':'+note;
+  if(down){ M._ds_live_on_wasm(t,note,100); liveHeld.add(key); }
+  else{
+    liveHeld.delete(key);                          // stale or not, JS-side tracking mirrors the pool
+    M._ds_live_off_wasm(t,note);                   // C-side dedups: stale off emits nothing
+  }
+  readMidiOut();                                 // live on/off emit into out[] immediately — drain now
+}
 function stepEntry(pressed,down,released){
-  if(!down||!Array.isArray(pressed)) return;
+  if(!down||(!Array.isArray(pressed)&&!Array.isArray(released))) return;
   const t=selTrack;
   const start=trkU8(t,'loop_start'), len=trkU8(t,'loop_len');
   if(((cursor+64-start)&63)>=len) cursor=start;   // resync into the window
-  for(const keyIdx of pressed){
-    const note=53+keyIdx;                          // F3 = 53
-    if(trkU8(t,'channel')===9){                    // drums: fixed GM map
-      const gm=[36,38,42,46,49,45,41,43,51,47,39,56,37,54,40,58,62,63,27,34];
-      M._ds_voice_add_wasm(t,cursor,gm[keyIdx%gm.length],100,1);
-    } else {
-      M._ds_voice_add_wasm(t,cursor,note,100,1);
-    }
+  for(const keyIdx of (pressed||[])){
+    liveNote(keyIdx,true);                        // hear it now
+    const note = trkU8(t,'channel')===9 ? [36,38,42,46,49,45,41,43,51,47,39,56,37,54,40,58,62,63,27,34][keyIdx%20] : 53+keyIdx;
+    M._ds_voice_add_wasm(t,cursor,note,100,1);
   }
-  if(pressed.length) cursor=(start+(((cursor+64-start)+1)%len))&63;  // advance inside the window
+  for(const keyIdx of (released||[])) liveNote(keyIdx,false);   // key up -> note-off
+  if(pressed&&pressed.length) cursor=(start+(((cursor+64-start)+1)%len))&63;  // advance inside the window
 }
 
 /* ---------- main loop ---------- */
@@ -169,7 +183,7 @@ function frame(t){
   if(!lastT)lastT=t;
   let dt=(t-lastT)/1000; lastT=t;
   if(dt>0.25)dt=0.25;
-  if(playing){ M._ds_tick_wasm(dt); readMidiOut(); }
+  M._ds_tick_wasm(dt); readMidiOut();            // tick always: live note-offs must drain even when stopped
   if(mode==='home')drawHome(); else drawGrid();
   rafId=requestAnimationFrame(frame);
 }
@@ -190,14 +204,15 @@ function panelButton(ev){
       case 'OCT+': page=(page+1)&3; break;
       case 'REC': M._ds_toggle_step_wasm(selTrack,cursor); break;  // v1: REC=cursor toggle
       case 'HOME': mode = mode==='home'?'grid':'home'; page=0; break;
-      case 'PLAY': if(!playing){ ensureAudio(); M._ds_play_wasm(); playing=true; } break; // down starts
+      case 'PLAY': break;                              // handled on release edge (toggle)
       case 'SELECT': selectTrack((selTrack+15)%16); break;
       default: break;                               // SAVE/FX/SCL/ENV/LFO/EDIT/GLO: v1 unsignaled
     }
   }
   for(const bit of upBits){
-    if(bitName(bit)==='PLAY'){                       // release stops (single PLAY/STOP key)
+    if(bitName(bit)==='PLAY'){                       // toggle on release edge (one physical PLAY/STOP key)
       if(playing){ M._ds_stop_wasm(); playing=false; readMidiOut(); }  // drain the CC123 all-notes-off
+      else if(upBits.length===1){ ensureAudio(); M._ds_play_wasm(); playing=true; }  // fresh click (not key-off of a chord)
     }
   }
 }
