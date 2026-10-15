@@ -105,16 +105,22 @@ function beep(note,vel){
 /* ---------- the screen: HOME hero (03-screens) ---------- */
 function drawHome(){
   ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
-  ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,20);
-  ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
-  const routeG=()=> 'U';                                     // v1: all-USB routing (spec 01 §route)
-  ctx.fillText(`TRK 03 │ PTN 01 │ ${Math.round(f64(OFF.bpm))} │ ${playing?'PLAY':'GRID'}`,6,14);
-  ctx.fillStyle='#7fd94a';
-  ctx.fillText(`TRK ${String(selTrack+1).padStart(2,'0')}`,196,14);
+  ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,20);  ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
+  const routeG=()=> 'U';                                     // v1: all-USB routing; glyphs A=all B=ble U=usb
+  ctx.fillText(`TRK ${String(selTrack+1).padStart(2,'0')} │ PTN 01 │ ${Math.round(f64(OFF.bpm))}`,6,14);
+  // K3/K1 readout strip: exact START of the SELECTED track (K3's target) + LEN (K1's).
+  // The 16 bars below show relative windows; this strip shows the absolute numbers so
+  // turning K3 has a numeric anchor, not just a moving highlight.
+  const sSel=trkU8(selTrack,'loop_start'), lSel=trkU8(selTrack,'loop_len');
+  ctx.font='10px monospace'; ctx.fillStyle='#0e0e12'; ctx.fillRect(0,22,CH,14);
+  ctx.fillStyle= trkU8(selTrack,'mute')? '#5a5a62' : '#5fe08a';
+  ctx.fillText(`S ${String(sSel).padStart(2,'0')}`,8,33);
+  ctx.fillStyle= trkU8(selTrack,'mute')? '#5a5a62' : '#eaeaea';
+  ctx.fillText(`L ${String(lSel).padStart(2,'0')}`,52,33);
   const barH=11, gapY=1, x0=56, x1=232, w=x1-x0;             // left gutter: TRK LEN R [M]
   ctx.font='9px monospace';
   for(let t=0;t<TRACKS;t++){
-    const y=24+t*(barH+gapY);
+    const y=36+t*(barH+gapY);
     const muted=trkU8(t,'mute');
     const start=trkU8(t,'loop_start'), len=trkU8(t,'loop_len');
     // left gutter: TRK nn | LEN nn | route | M
