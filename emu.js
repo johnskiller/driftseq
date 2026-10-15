@@ -261,8 +261,8 @@ function drawDrumGrid(){
   ctx.fillText('BLK=drum WHT=toggle · K1-K4 track',18,233);
 }
 
-/* ---------- step-entry (02-input v1): key press writes the cursor step ---------- */
-let cursor=0;                                    // absolute step 0..63
+/* ---------- step-entry is the DEFAULT state (02 §2.1 rev.5): key press writes the cursor step ---------- */
+let cursor=0;                                    // absolute step 0..63 — always present, cursor = selection
 const liveHeld=new Set();                        // panel keys currently sounding (note-off dedup)
 /* Key id → is it a black key? panel.js key ids are CHROMATIC (0..26 = F3..G5), NOT
  * "white 0..15 then black 16..26". Whites = [0,2,4,6,7,9,11,12,14,16,18,19,21,23,24,26],
@@ -324,6 +324,88 @@ function stepEntry(pressed,down,released){
   if(pressed&&pressed.length) cursor=(start+(((cursor+64-start)+1)%len))&63;  // advance inside the window
 }
 
+/* ---------- rev.5 cursor axis + OCT rest/tie (02 §2.1 rev.3-5) ----------
+ * K1 = pure cursor axis: left = back one, right = forward one, writes nothing.
+ * GLO long-press + K1 = ×16 (one page per detent). OCT+ cycles rest→tie→restore
+ * on the cursor step WITHOUT moving; OCT− = back (same as K1 left, paired). */
+let gloHeld=false, restState=new Map();          // restState: step -> 0 none / 1 rest / 2 tie / 3 original-gate
+function cursorMove(n){                          // n = detents (+ fwd / - back)
+  const t=selTrack;
+  const start=trkU8(t,'loop_start'), len=trkU8(t,'loop_len');
+  const step=(gloHeld?16:1)*(n>0?1:-1)*Math.abs(n);
+  cursor=(start+(((cursor+64-start)+step)%len+len)%len)&63;   // stay inside the window
+}
+function restTieCycle(){                         // OCT+ on the cursor step: none→rest→tie→none
+  const t=selTrack, s=cursor;
+  const cur=restState.get(s)||0;
+  const next=(cur+1)%3;                          // 0 none, 1 rest, 2 tie
+  restState.set(s,next);
+  const gateOff=trkOff(t)+TK.steps+s*ST.size+ST.voices;      // v[0].gate (ds_note = note,vel,gate,on)
+  const velOff =gateOff+1;
+  if(next===1) H8[S+stepOff(t,s)+ST.on]=0;                   // rest: en=0, voices kept
+  else if(next===2){ H8[S+gateOff]=0xFF; H8[S+velOff]=H8[S+velOff]||100; }   // tie: gate=0xFF
+  else H8[S+stepOff(t,s)+ST.on]=1;                            // restore: en back on (gate untouched)
+}
+
+/* ---------- the screen: EDIT page (03 §3 rev.6) — voice cards + step params ---------- */
+const COND_NAMES=['—','每2圈','每3圈','每4圈','每5圈','每6圈','每7圈','仅首圈','末4圈','FILL','flam'];
+let editVoice=0;                                 // active voice 0..3 (SELECT knob cycles)
+let condZoom=0;                                  // >0 = cond zoom feedback timer (frames)
+function drawEdit(){
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
+  const t=selTrack, s=cursor;
+  const vBase=trkOff(t)+TK.steps+s*ST.size+ST.voices;
+  const nv=stepU8(t,s,'nvoices');
+  ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,20);
+  ctx.font='11px monospace';
+  const v0n=(nv>0)?H8[S+vBase]:null;
+  const NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const nm=(v0n===null||v0n===0xFF)?'':` ${NAMES[v0n%12]}${Math.floor(v0n/12)-1}`;
+  ctx.fillStyle='#d9d9e8'; ctx.fillText(`EDIT TRK ${t+1} · st${s}${nm}`,6,14);
+  // voice cards: 4 rows, active card inverted
+  for(let vi=0;vi<4;vi++){
+    const y=24+vi*47, active=vi===editVoice;
+    ctx.fillStyle=active?'#2a2a36':'#141419';
+    ctx.fillRect(4,y,CH-8,43);
+    if(active){ ctx.strokeStyle='#e6c84a'; ctx.strokeRect(4.5,y+0.5,CH-9,42); }
+    const note=(vi<nv)?H8[S+vBase+vi*4]:0xFF;
+    const vel =(vi<nv)?H8[S+vBase+vi*4+1]:0;
+    const gate=(vi<nv)?H8[S+vBase+vi*4+2]:0;
+    ctx.fillStyle=active?'#fff4d6':'#9a9aa6'; ctx.font='13px monospace';
+    if(note===0xFF){
+      ctx.fillText(`v${vi+1}  ─ 空  (弹黑键加入)`,14,y+27);
+    } else {
+      const on=stepU8(t,s,'on');
+      const sym=!on?'●':(playing&&i32(OFF.pos16+t*4)===s)?'▶':'○';   // ●=silent-keep ▶=sounding ○=armed
+      const gn=gate===0xFF?'∞':(gate/4).toFixed(2);
+      ctx.fillText(`v${vi+1} ${sym} ${NAMES[note%12]}${Math.floor(note/12)-1} ${String(note).padStart(3,'0')}`,14,y+27);
+      ctx.font='10px monospace'; ctx.fillStyle='#8a8a99';
+      ctx.fillText(`VEL ${vel}  GATE ${gn}`,150,y+27);
+    }
+  }
+  // footer: K1..K4 values for the active voice (K4 = step prob)
+  const sBase=trkOff(t)+TK.steps+s*ST.size;
+  const av=Math.min(editVoice,Math.max(0,nv-1));
+  const aGate=(nv>0&&av<nv)?H8[S+vBase+av*4+2]:1;
+  const cond=H8[S+sBase+ST.cond];
+  ctx.fillStyle='#181820'; ctx.fillRect(0,216,CH,24);
+  ctx.font='10px monospace';
+  const vIdx=av+1;
+  if(condZoom>0){
+    ctx.fillStyle='#fff4d6'; ctx.font='12px monospace';
+    ctx.fillText(`COND ${cond+1}/11 ${COND_NAMES[cond]}`,10,231);
+  } else {
+    ctx.fillStyle='#d9d9e8';
+    ctx.fillText(`PITCH ${nv?('v'+vIdx):'—'}`,10,226);
+    ctx.fillText(`GATE ${aGate===0xFF?'∞':(aGate/4).toFixed(2)}`,78,226);
+    ctx.fillText(`VEL ${nv?H8[S+vBase+av*4+1]:'—'}`,150,226);
+    ctx.fillText(`PROB ${stepU8(t,s,'prob')}%`,214,226);
+    ctx.fillStyle='#6a6a76';
+    ctx.fillText('K1 pitch K2 gate K3 vel K4 prob · SEL=voice',10,237);
+  }
+  if(condZoom>0) condZoom--;
+}
+
 /* ---------- main loop ---------- */
 const flash=new Float32Array(TRACKS);
 function frame(t){
@@ -332,7 +414,7 @@ function frame(t){
   if(dt>0.25)dt=0.25;
   try{
     M._ds_tick_wasm(dt); readMidiOut();          // tick always: live note-offs must drain even when stopped
-    if(mode==='home')drawHome(); else drawGrid();
+    if(mode==='home')drawHome(); else if(mode==='edit')drawEdit(); else drawGrid();
   }catch(e){ crashBeacon('frame: '+e.message); lastT=0; }  // log it; next rAF retries
   rafId=requestAnimationFrame(frame);
 }
@@ -348,18 +430,21 @@ function panelButton(ev){
     const name=bitName(bit);
     switch(name){
       case 'SEQ': mode='grid'; break;
+      case 'EDIT': mode=(mode==='edit')?'grid':'edit'; break;   // EDIT toggle (03 §3.1)
       case 'ARP': mode='home'; break;               // v1: no Euclid page yet
+      case 'GLO': gloHeld=true; break;               // modifier: rest of this down-mask = shifted
       case 'OCT-': page=(page+3)&3; break;
-      case 'OCT+': page=(page+1)&3; break;
+      case 'OCT+': restTieCycle(); break;            // GRID: rest/tie 3-state on cursor (rev.4)
       case 'REC': M._ds_toggle_step_wasm(selTrack,cursor); break;  // v1: REC=cursor toggle
       case 'HOME': mode = mode==='home'?'grid':'home'; page=0; break;
       case 'PLAY': break;                              // handled on release edge (toggle)
       case 'SELECT': selectTrack((selTrack+15)%16); break;
-      default: break;                               // SAVE/FX/SCL/ENV/LFO/EDIT/GLO: v1 unsignaled
+      default: break;                               // SAVE/FX/SCL/ENV/LFO: v1 unsignaled
     }
   }
   for(const bit of upBits){
-    if(bitName(bit)==='PLAY'){                       // toggle on release edge (one physical PLAY/STOP key)
+    if(bitName(bit)==='GLO') gloHeld=false;          // long-press window closes on release
+    else if(bitName(bit)==='PLAY'){                       // toggle on release edge (one physical PLAY/STOP key)
       if(playing){ M._ds_stop_wasm(); playing=false; readMidiOut(); clearHeldMirrors(); }  // drain CC123, kill mirrors
       else if(upBits.length===1){ ensureAudio(); M._ds_play_wasm(); playing=true; }  // fresh click (not key-off of a chord)
     }
@@ -375,6 +460,43 @@ function clearHeldMirrors(){
 }
 function bitName(bit){ return Object.entries(DSPanel.B).find(([n,b])=>b===bit)?.[0]; }
 function panelEnc(role,n){
+  if(mode==='edit'){                                        // ---- EDIT page (03 §3 rev.6) ----
+    const t=selTrack, s=cursor;
+    const vBase=trkOff(t)+TK.steps+s*ST.size+ST.voices;
+    const nv=stepU8(t,s,'nvoices');
+    if(role===0){                                           // SELECT: cycle active voice
+      editVoice=Math.max(0,Math.min(3,editVoice+(n>0?1:-1))); return;
+    }
+    const av=Math.min(editVoice,Math.max(0,nv-1));
+    if(nv===0) return;                                      // empty step: nothing to edit yet
+    if(role===3){                                           // K1 PITCH (GLO held = COND)
+      if(gloHeld){
+        const sBase=trkOff(t)+TK.steps+s*ST.size;
+        let c=(H8[S+sBase+ST.cond]+(n>0?1:-1)+11)%11;       // 11-state ring (enum, no bounds issue)
+        M._ds_cond_set_wasm(t,s,c); condZoom=70;            // zoom feedback ~1s
+      } else {
+        const p=H8[S+vBase+av*4];
+        M._ds_note_set_wasm(t,s,av,Math.max(0,Math.min(127,p+n)),-1,-1);
+      }
+      return;
+    }
+    if(role===4){                                           // K2 GATE: +1 detent = +0.25 step (gate raw = ×4)
+      const g=H8[S+vBase+av*4+2];
+      let ng;
+      if(g===0xFF) ng = n>0 ? 1 : 0xFF;                     // ∞ → right detent returns to 0.25
+      else { ng=g+n; if(ng>32){ng=0xFF;} if(ng<1){ng=1;} }  // 8.00 → right = ∞ (pending #6)
+      M._ds_note_set_wasm(t,s,av,-1,-1,ng); return;
+    }
+    if(role===5){                                           // K3 VEL
+      const v=H8[S+vBase+av*4+1];
+      M._ds_note_set_wasm(t,s,av,-1,Math.max(1,Math.min(127,v+n)),-1); return;
+    }
+    if(role===6){                                           // K4 PROB (step-level)
+      const p=stepU8(t,s,'prob');
+      H8[S+stepOff(t,s)+ST.prob]=Math.max(0,Math.min(100,p+n*5)); return;
+    }
+    return;
+  }
   if(role===0){                                              // SELECT: track, NO wrap
     const next=Math.max(0,Math.min(15,selTrack+(n>0?1:-1)));  // endpoints dead-stop; (future:
     if(next!==selTrack) selectTrack(next); return;            //  accel flick → jump TRK01/16)
@@ -382,8 +504,14 @@ function panelEnc(role,n){
   if(role===1){ M._ds_set_bpm_wasm(Math.max(40,Math.min(240,f64(OFF.bpm)+n))); return; } // ALGORITHM: BPM (v1)
   if(role===2){ return; }                                                     // PRESETS: unsignaled
   const t=selTrack;
-  if(role===3) M._ds_set_loop_wasm(t,Math.max(0,Math.min(63,trkU8(t,'loop_start')+n)),-1); // K1 START
-  if(role===4) M._ds_set_loop_wasm(t,-1,Math.max(1,Math.min(64,trkU8(t,'loop_len')+n)));   // K2 LEN
+  if(role===3){                                              // K1: HOME=START / GRID=cursor axis (rev.5)
+    if(mode==='grid'){ cursorMove(n); return; }
+    M._ds_set_loop_wasm(t,Math.max(0,Math.min(63,trkU8(t,'loop_start')+n)),-1); return;
+  }
+  if(role===4){                                              // K2: HOME/SEQ=LEN (GLO held = ×16 cursor too)
+    if(mode==='grid'&&gloHeld){ cursorMove(n); return; }
+    M._ds_set_loop_wasm(t,-1,Math.max(1,Math.min(64,trkU8(t,'loop_len')+n))); return;
+  }
   if(role===5) M._ds_mute_wasm(t, n>0?1:0);                                   // K3 MUTE: right=on, left=off
   if(role===6){                                                               // K4 PROB
     const s=cursor, p=stepU8(t,s,'prob');
@@ -521,13 +649,17 @@ async function boot(){
       loop_start:M._ds_trk_off_loop_start(), loop_len:M._ds_trk_off_loop_len(),
       division:M._ds_trk_off_division(), mute:M._ds_trk_off_mute(), steps:M._ds_trk_off_steps()};
   ST={size:M._ds_step_size(), on:M._ds_step_off_on(), nvoices:M._ds_step_off_nvoices(),
-      prob:M._ds_step_off_prob(), voices:M._ds_step_off_voices()};
+      prob:M._ds_step_off_prob(), voices:M._ds_step_off_voices(), cond:M._ds_step_off_cond()};
 
   DSPanel.build();
   DSPanel.onButton(panelButton);
   DSPanel.onKey((pressed,down,released)=>{       // drum grid edits go through the drum handler;
     if(mode==='grid' && trkU8(selTrack,'channel')===9) drumKeyHandler(pressed,down,released);
-    else stepEntry(pressed,down,released);       // melodic / step-entry keeps the 02 behavior
+    else if(mode==='grid') stepEntry(pressed,down,released);       // melodic: step-entry is the default state (rev.5)
+    else {                                        // EDIT/PLAY pages: keys = live audition only (no writes)
+      for(const k of (pressed||[])) liveNote(k,true);
+      for(const k of (released||[])) liveNote(k,false);
+    }
   });
   DSPanel.onEnc(panelEnc);
 
