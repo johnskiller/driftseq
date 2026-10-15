@@ -75,6 +75,7 @@ void ds_play(ds_state *s) {
 void ds_stop(ds_state *s) {
     int i;
     s->playing = 0;
+    s->out_len = 0;                                  /* stop's bytes are the whole message */
     for (i = 0; i < DS_TRACKS; i++) {               /* all notes off, part of the stream */
         s->out[s->out_len++] = 0xB0 | (s->pat.track[i].channel & 0x0F);
         s->out[s->out_len++] = 123;

@@ -116,7 +116,8 @@ const DSPanel = (() => {
     if (m!==btnMask){
       const released = btnMask & ~m;
       btnMask=m;
-      if (handlers.button) handlers.button({ mask:m, bits:[...btnBy.values()], down:true, released:[...bitsOf(released)] });
+      // down and up both reach the handler: bits[] = bits now in the mask, released[] = bits that just left it
+      if (handlers.button) handlers.button({ mask:m>>>0, bits:[...btnBy.values()], down:true, released:[...bitsOf(released)] });
     }
     else if (!redraw) return;
     for (const b of buttons){
