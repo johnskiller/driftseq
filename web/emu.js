@@ -66,7 +66,16 @@ function readMidiOut(){
   const n=i32(OFF.out_len), base=OFF.out;
   if(n>0){
     const bytes=H8.slice(S+base,S+base+n);
-    if(midiOut){ try{ midiOut.send(bytes);}catch(e){} }
+    if(midiOut){
+      try{
+        midiOut.send(bytes);
+        for(let i=0;i<bytes.length;){            // stamp each message into the echo ring
+          const b=bytes[i]; if(b<0x80){i++;continue;}
+          const t2=b&0xF0, len=(t2===0xC0||t2===0xD0)?2:3;
+          echoStamp(bytes.slice(i,i+len)); i+=len;
+        }
+      }catch(e){}
+    }
     for(let i=0;i<bytes.length;){
       const b=bytes[i];
       if(b<0x80){i++;continue;}
@@ -234,10 +243,18 @@ function panelButton(ev){
   }
   for(const bit of upBits){
     if(bitName(bit)==='PLAY'){                       // toggle on release edge (one physical PLAY/STOP key)
-      if(playing){ M._ds_stop_wasm(); playing=false; readMidiOut(); }  // drain the CC123 all-notes-off
+      if(playing){ M._ds_stop_wasm(); playing=false; readMidiOut(); clearHeldMirrors(); }  // drain CC123, kill mirrors
       else if(upBits.length===1){ ensureAudio(); M._ds_play_wasm(); playing=true; }  // fresh click (not key-off of a chord)
     }
   }
+}
+/* STOP must not leave phantom "held" notes anywhere:
+ * engine pool is cleared in ds_stop (C); here we drop the JS mirrors so a later
+ * hardware/echo note-off can't re-light keys or double-fire. */
+function clearHeldMirrors(){
+  liveHeld.clear();
+  keyStates.clear();                                 // also un-light hardware-held keys
+  if(DSPanel.syncKeys) DSPanel.syncKeys();
 }
 function bitName(bit){ return Object.entries(DSPanel.B).find(([n,b])=>b===bit)?.[0]; }
 function panelEnc(role,n){
@@ -292,13 +309,29 @@ function refreshMidi(){
  *   CC 40..53 ch1  -> 14 buttons FX SEL ENV LFO EDIT GLO HOME SAVE ARP SEQ PLAY REC OCT- OCT+ (127/0)
  *   CC 20..26 ch1  -> encoders SELECT ALGORITHM PRESETS K1..4, relative 64±n
  *   CC 20..26 ch2  -> push+turn (second layer, 0xB1)
- *   CC 27          -> MASTER (abs 0..127)                                        */
+ *   CC 27          -> MASTER (abs 0..127)
+ * ECHO GUARD (exact-match): a message we sent out within the last 250 ms is
+ * dropped on input (IAC / thru loops our own stream back). Exact 3-byte match —
+ * a blanket time window would swallow real hardware events mid-playback.      */
 const BTN_CC0=40, ENC_CC0=20;
 const keyStates=new Set();                       // notes currently held from hardware
 let midiInId='all';                              // 'all' = bind every input
+let echoRing=[];                                 // [{s:'90 35 64', t:ms}] recent out sends
+const ECHO_MS=250;
+function echoStamp(msg){                         // remember what we sent
+  const now=performance.now();
+  echoRing.push({s:[...msg].map(x=>x.toString(16).padStart(2,'0')).join(' '), t:now});
+  if(echoRing.length>64) echoRing=echoRing.slice(-48);
+}
+function echoHit(st,d1,d2){
+  const s=[st,d1,d2].map(x=>x.toString(16).padStart(2,'0')).join(' ');
+  const now=performance.now();
+  return echoRing.some(r=>r.s===s&&now-r.t<ECHO_MS);
+}
 function noteToKeyIdx(note){ return note-53; }   // key idx 0..26
 function midiIn3(st,d1,d2){
   const t=st&0xF0, ch=st&0x0F;
+  if(echoHit(st,d1,d2)) return;                  // our own echo — ignore, breaks the loop
   if(t===0x90&&d2>0){                            // key down
     const i=noteToKeyIdx(d1);
     if(i>=0&&i<27&&!keyStates.has(d1)){ keyStates.add(d1); DSPanel.keyDown(i); }
