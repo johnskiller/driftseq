@@ -8,7 +8,8 @@
 <style>
 :root { --bg:#8e8e93; --fg:#111; --dim:#2c2c2e; --rule:#5a5a5e;
         --body:#1d1d1f; --tray:#141415; --part:#2a2a2d; --edge:#3a3a3e; --label:#d6d6d8;
-        --lit:#fff4d6; --green:#5fe08a; color-scheme: light; }
+        --lit:#fff4d6; --green:#5fe08a; }
+select { color-scheme: dark; }          /* native popup must render dark: page bg is near-black */
 html, body { background: var(--bg); }
 body { margin:0; color:var(--fg); font:13px/1.6 -apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif; }
 main { max-width:1040px; margin:0 auto; padding:24px 16px 32px; }
