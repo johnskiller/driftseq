@@ -171,6 +171,7 @@ function drawHome(){
 
 /* ---------- the screen: SEQ grid (03-screens) ---------- */
 function drawGrid(){
+  if(trkU8(selTrack,'channel')===9) return drawDrumGrid();      // ch10 = drum lanes view
   ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
   ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,20);
   ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
@@ -228,9 +229,65 @@ function drawGrid(){
   ctx.fillText('K1 START  K2 LEN  K3 DIV  K4 CH',18,233);
 }
 
+/* ---------- the screen: drum lanes (03 §2.3 — ALL drums visible, selected lane lit) ---------- */
+function drawDrumGrid(){
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
+  ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,20);
+  ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
+  ctx.fillText(`DRUM TRK ${selTrack+1} · p${page+1}/4`,6,14);
+  ctx.fillStyle= trkU8(selTrack,'mute')?'#5a5a62':'#5fe08a';
+  ctx.fillText(GM_SHORT[drumSel]||('D'+drumSel),200,14);
+  const nL=GM_DRUMS.length, lh=Math.min(21,(CH-40)/nL), x0=34;
+  const pos=i32(OFF.pos16+selTrack*4);
+  ctx.font='8px monospace';
+  for(let li=0;li<nL;li++){
+    const y=24+li*lh, sel=li===drumSel;
+    ctx.fillStyle=sel?'#c9c9d4':'#6a6a76';
+    ctx.fillText(GM_SHORT[li],2,y+lh-6);
+    for(let c=0;c<16;c++){
+      const s=page*16+c;
+      const vBase=trkOff(selTrack)+TK.steps+s*ST.size;
+      let on=false;
+      for(let vi=0;vi<stepU8(selTrack,s,'nvoices');vi++) if(H8[S+vBase+vi*4]===GM_DRUMS[li]) on=true;
+      const cw=(CH-8-x0)/16;
+      ctx.globalAlpha=sel?1:0.35;
+      ctx.fillStyle=on?DPAL[li%DPAL.length]:(sel?'#1d1d26':'#15151a');
+      ctx.fillRect(x0+c*cw+1,y+1,cw-2,lh-2);
+      if(playing&&pos===s){ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillRect(x0+c*cw,y,cw,1);}  // playhead tick
+    }
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle='#8a8a99'; ctx.font='10px monospace';
+  ctx.fillText('BLK=drum WHT=toggle · K1-K4 track',18,233);
+}
+
 /* ---------- step-entry (02-input v1): key press writes the cursor step ---------- */
 let cursor=0;                                    // absolute step 0..63
 const liveHeld=new Set();                        // panel keys currently sounding (note-off dedup)
+/* Drum GRID editing (spec 02 §2.1 / 03 §2.3): black keys = pick instrument, white keys =
+ * toggle that drum across the 16 steps of the keybed page. TR-808 muscle memory. */
+let drumSel=0;                                   // index into GM_DRUMS (black-key order)
+const GM_SHORT=['KCK','SNR','CHH','OHH','CUP','TOM','RID','PERC','SHK','CAB','MAR'];
+function drumKeyHandler(pressed,down,released){
+  const t=selTrack, inGrid=mode==='grid';
+  const black=GM_DRUMS.length;                   // key id >= blackStart => black key
+  for(const k of (pressed||[])){
+    if(k>=16){                                   // black key: pick drum (audition, light LED)
+      drumSel=Math.min(k-16,GM_DRUMS.length-1);
+      liveNote(k,true);                          // hear it
+    } else if(inGrid){
+      const s=page*16+k;                         // white key = toggle drumSel at this step
+      const vBase=trkOff(t)+TK.steps+s*ST.size;
+      let hit=-1;
+      for(let vi=0;vi<stepU8(t,s,'nvoices');vi++) if(H8[S+vBase+vi*4]===GM_DRUMS[drumSel]) hit=vi;
+      if(hit>=0) M._ds_voice_remove_wasm(t,s,GM_DRUMS[drumSel]);   // engine removes by note
+      else M._ds_voice_add_wasm(t,s,GM_DRUMS[drumSel],100,1);
+      liveNote(16+drumSel,true);                 // audition via the black key's note
+    } else liveNote(k,true);                     // non-grid (step-entry/PLAY): melodic path
+  }
+  for(const k of (released||[])) if(k>=16||!inGrid) liveNote(k,false);
+}
+
 function liveNote(keyIdx,down){                  // panel key -> live preview note through the engine
   const t=selTrack;
   let note;
@@ -461,7 +518,10 @@ async function boot(){
 
   DSPanel.build();
   DSPanel.onButton(panelButton);
-  DSPanel.onKey(stepEntry);
+  DSPanel.onKey((pressed,down,released)=>{       // drum grid edits go through the drum handler;
+    if(mode==='grid' && trkU8(selTrack,'channel')===9) drumKeyHandler(pressed,down,released);
+    else stepEntry(pressed,down,released);       // melodic / step-entry keeps the 02 behavior
+  });
   DSPanel.onEnc(panelEnc);
 
   $('go').addEventListener('click',()=>{
