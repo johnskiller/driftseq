@@ -161,7 +161,7 @@ function drawHome(){
   }
   ctx.fillStyle='#181820'; ctx.fillRect(0,220,CH,20);
   ctx.fillStyle='#8a8a99'; ctx.font='10px monospace';
-  ctx.fillText('K1 LEN   K2 MUTE   K3 START   K4 PROB',6,233);
+  ctx.fillText('K1 START   K2 LEN   K3 MUTE   K4 PROB',6,233);
 }
 
 /* ---------- the screen: SEQ grid (03-screens) ---------- */
@@ -270,13 +270,16 @@ function clearHeldMirrors(){
 }
 function bitName(bit){ return Object.entries(DSPanel.B).find(([n,b])=>b===bit)?.[0]; }
 function panelEnc(role,n){
-  if(role===0){ selectTrack((selTrack+ (n>0?1:15))%16); return; }             // SELECT: track
+  if(role===0){                                              // SELECT: track, NO wrap
+    const next=Math.max(0,Math.min(15,selTrack+(n>0?1:-1)));  // endpoints dead-stop; (future:
+    if(next!==selTrack) selectTrack(next); return;            //  accel flick → jump TRK01/16)
+  }
   if(role===1){ M._ds_set_bpm_wasm(Math.max(40,Math.min(240,f64(OFF.bpm)+n))); return; } // ALGORITHM: BPM (v1)
   if(role===2){ return; }                                                     // PRESETS: unsignaled
   const t=selTrack;
-  if(role===3) M._ds_set_loop_wasm(t,-1,Math.max(1,Math.min(64,trkU8(t,'loop_len')+n)));   // K1 LEN
-  if(role===4) M._ds_mute_wasm(t, trkU8(t,'mute')?(n>0?0:1):(n<0?1:0));       // K2 MUTE
-  if(role===5) M._ds_set_loop_wasm(t,Math.max(0,Math.min(63,trkU8(t,'loop_start')+n)),-1); // K3 START
+  if(role===3) M._ds_set_loop_wasm(t,Math.max(0,Math.min(63,trkU8(t,'loop_start')+n)),-1); // K1 START
+  if(role===4) M._ds_set_loop_wasm(t,-1,Math.max(1,Math.min(64,trkU8(t,'loop_len')+n)));   // K2 LEN
+  if(role===5) M._ds_mute_wasm(t, n>0?1:0);                                   // K3 MUTE: right=on, left=off
   if(role===6){                                                               // K4 PROB
     const s=cursor, p=stepU8(t,s,'prob');
     H8[S+stepOff(t,s)+ST.prob]=Math.max(0,Math.min(100,p+n*5));
