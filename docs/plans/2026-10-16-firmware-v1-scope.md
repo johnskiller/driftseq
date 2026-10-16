@@ -8,7 +8,8 @@
 
 **进**：
 1. **引擎移植**（host/driftseq.c 已是纯 C，零改动或近零改动——pi32v2 编译即可）：
-   ds_tick / step-entry 覆盖制 / OCT 簇 / GLO+K1 START / rest-tie / voice add-remove-set
+   ds_tick / step-entry 覆盖制 / OCT 簇 / GLO+K1 START / rest-tie / voice add-remove-set /
+   Euclid floor 形（Toussaint 规范相位）+ eu_rot 生效（03 §4.2 纸面定稿，golden 重录一次）
 2. **UI 移植**（emu rev.14g 的 draw 分支照抄，canvas → LCD）：HOME hero / MELODY GRID
    （24px bar + 嵌页 EDIT）/ DRUM GRID（9×11 lanes + 单大卡）/ 底栏 prefix-free
 3. **输入层**（fm1-ctrl 已验证的 keyscan/encoders/leds/midi_io 拷贝）：
