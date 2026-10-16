@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r14a 10-16';
+const BUILD='r14b 10-16';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -211,7 +211,7 @@ function drawGrid(){
     if(c===0){ctx.fillStyle='#8a8a99';ctx.fillText(`P${r+1}`,3,y+13);}
   }
   drawEditPanel(96);                                            // rev.12: EDIT embedded, y=112..
-  drawFooter(['K1 step','K2 len','K3 mute','K4 prob'], focusLayer==='edit');
+  drawFooter(focusLayer==='edit');
 }
 
 /* ---------- rev.12/13c: EDIT panel embedded at bottom of GRID (melodic 4 cards / drum 1 big card) ---------- */
@@ -236,30 +236,27 @@ function drawEditPanel(y0){                       // y0=96 (melodic, 4 compact c
     const on=stepU8(t,s,'on');
     const sym=!on?'●':(playing&&i32(OFF.pos16+t*4)===s)?'▶':'○';
     const nm2=`${NAMES[v.note%12]}${Math.floor(v.note/12)-1}`;
-    ctx.fillStyle=active?'#fff4d6':'#b9b9c4'; ctx.font='10px monospace';
-    ctx.fillText(`v${vi+1} ${sym} ${nm2}`,6,y+16);
-    // ---- param bar: right half (rev.13) ----
-    const bx=96, bw=CH-bx-8, by=y+5, bh=cardH-10;
-    ctx.fillStyle=`hsl(0,0%,${18+ (v.vel/127)*55}%)`;           // bg luminance = velocity
+    const g2=v.gate===0xFF?'∞':(v.gate/4).toFixed(2);
+    const prob=stepU8(t,s,'prob');
+    ctx.fillStyle=active?'#fff4d6':'#b9b9c4'; ctx.font='9px monospace';
+    ctx.fillText(`v${vi+1}${sym} ${nm2} g${g2} v${v.vel} p${prob}`,6,y+16);   // exact numbers (rev.14b)
+    // ---- param bar underneath the text: bg lum = vel, len = gate, hue desat = prob ----
+    const bx=6, bw=CH-bx-12, by=y+18, bh=4;
+    ctx.fillStyle=`hsl(0,0%,${18+(v.vel/127)*55}%)`;             // bg luminance = velocity
     ctx.fillRect(bx,by,bw,bh);
-    const frac=(v.gate===0xFF)?1:Math.min(1,(v.gate/4)/8);      // gate 8.00 = full
-    const hue=v.note%12*30, sat=v.on===undefined?(stepU8(t,s,'prob')):stepU8(t,s,'prob');
-    const desat=stepU8(t,s,'prob')/100;                          // prob: 1=pure hue, 0=grey
+    const frac=(v.gate===0xFF)?1:Math.min(1,(v.gate/4)/8);       // gate 8.00 = full
+    const hue=v.note%12*30, desat=prob/100;                      // prob: 1=pure hue, 0=grey
     ctx.fillStyle=`hsl(${hue},${Math.round(72*desat)}%,55%)`;
     ctx.fillRect(bx,by,Math.max(2,bw*frac),bh);                  // bar length = gate
-    if(v.gate===0xFF&&playing){ctx.fillStyle='#fff';ctx.fillRect(bx+bw-2,by,2,bh);}
+    if(v.gate===0xFF&&playing){ctx.fillStyle='#fff';ctx.fillRect(bx+bw-3,by,3,bh);}
   }
-  ctx.fillStyle='#55555f'; ctx.font='8px monospace';
-  if(focusLayer==='edit'){ ctx.fillStyle='#6a6a76'; ctx.fillText('K1 pit K2 gat K3 vel K4 prob SEL=v',96,y0+118); }
 }
-function drawFooter(labels,editFocus){
+const FOOT_GRID=['K1 step','K2 len','K3 mute','K4 prob'];
+const FOOT_EDIT=['K1 pit','K2 gat','K3 vel','K4 prob','SEL v'];
+function drawFooter(editFocus){
   ctx.fillStyle='#181820'; ctx.fillRect(0,216,CH,24);
   ctx.fillStyle= editFocus?'#e6c84a':'#8a8a99'; ctx.font='8px monospace';
-  ctx.fillText(labels.join('  '),18,233);
-  if(!editFocus){
-    ctx.fillStyle= trkU8(selTrack,'mute')?'#5a5a62':'#5fe08a';
-    ctx.fillText(`st${cursor+1}`,186,233);
-  }
+  ctx.fillText((editFocus?FOOT_EDIT:FOOT_GRID).join('  '),18,233);
   ctx.fillStyle='#4a4a54'; ctx.fillText(BUILD,164,233);
 }
 
@@ -321,7 +318,7 @@ function drawDrumGrid(){
     ctx.fillStyle='#55555f'; ctx.font='10px monospace';
     ctx.fillText('此鼓此步无音 — 白键 toggle 写入',10,py+55);
   }
-  drawFooter(['K1 step','K2 len','K3 mute','K4 prob'], focusLayer==='edit');
+  drawFooter(focusLayer==='edit');
 }
 
 /* ---------- rev.13 helpers: sorted voices + chord name (03 §4 rev.11) ---------- */
@@ -551,9 +548,11 @@ function editKeyHandler(pressed,down,released){   // rev.14a: EDIT layer — cur
     const nv=stepU8(t,s,'nvoices');
     if(nv<4){
       M._ds_voice_add_wasm(t,s,note,100,4);
-      editVoice=nv;                                // new voice becomes active
-    } else {                                       // rev.11: full slot -> replace v4 (lowest priority)
-      M._ds_note_set_wasm(t,s,3,note,-1,-1);
+      editVoice=stepU8(t,s,'nvoices')-1;           // new voice becomes active
+    } else {                                       // rev.11: full -> replace the HIGHEST note (v4 after sort)
+      const vs=sortedVoices(t,s);
+      M._ds_voice_remove_wasm(t,s,vs[3].note);
+      M._ds_voice_add_wasm(t,s,note,100,4);
       editVoice=3;
     }
   }
