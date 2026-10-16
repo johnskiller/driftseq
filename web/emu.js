@@ -184,7 +184,7 @@ function drawGrid(){
   const nm = n0===null?'':` ${NAMES[n0%12]}${Math.floor(n0/12)-1}`;
   ctx.fillText(`SEQ TRK ${selTrack+1} · p${page+1}/4`,6,14);
   ctx.fillStyle= trkU8(selTrack,'mute')?'#5a5a62':'#5fe08a';
-  ctx.fillText(`st${cursor}${nm}`,186,14);
+  ctx.fillText(`st${cursor+1}${nm}`,186,14);
   if(keyShift!==0){                              // rev.7: keyboard shift indicator (GRID only)
     ctx.fillStyle='#e6c84a';
     ctx.fillText(`${keyShift>0?'+':''}${keyShift}`,150,14);
@@ -331,7 +331,7 @@ function stepEntry(pressed,down,released){
     M._ds_voice_add_wasm(t,cursor,note,100,1);
   }
   for(const keyIdx of (released||[])) liveNote(keyIdx,false);   // key up -> note-off
-  if(pressed&&pressed.length) cursor=(cursor+1)&63;  // rev.8: advance 0..63 (window gates playback, not entry)
+  if(pressed&&pressed.length) cursor=Math.min(63,cursor+1);  // rev.9: advance, dead-stop at 63 (no wrap, blind-safe)
 }
 
 /* ---------- rev.5 cursor axis + OCT rest/tie (02 §2.1 rev.3-5) ----------
@@ -341,7 +341,8 @@ function stepEntry(pressed,down,released){
 let gloHeld=false, restState=new Map();          // restState: step -> 0 none / 1 rest / 2 tie / 3 original-gate
 function cursorMove(n){                          // n = detents (+ fwd / - back)
   const step=(gloHeld?16:1)*(n>0?1:-1)*Math.abs(n);
-  cursor=((cursor+step)%64+64)%64;               // rev.8: full 0..63 — loop window gates playback, not editing
+  const next=cursor+step;                        // rev.9: NO wrap — endpoints dead-stop (John: blind-operable)
+  cursor=Math.max(0,Math.min(63,next));
 }
 /* ---------- rev.7: OCT± = keyboard interval shift while in GRID (John: the F3–G5
  * keybed is only ~2 octaves — OCT must shift the write pitch, not flip pages) ---------- */
@@ -385,7 +386,7 @@ function drawEdit(){
   if(v0n!==null&&v0n!==0xFF){
     nm = isDrum ? ` ${GM_SHORT[GM_DRUMS.indexOf(v0n)]||('D'+v0n)}` : ` ${NAMES[v0n%12]}${Math.floor(v0n/12)-1}`;
   }
-  ctx.fillStyle='#d9d9e8'; ctx.fillText(`EDIT TRK ${t+1} · st${s}${nm}`,6,14);
+  ctx.fillStyle='#d9d9e8'; ctx.fillText(`EDIT TRK ${t+1} · st${s+1}${nm}`,6,14);
   // voice cards: 4 rows, active card inverted
   for(let vi=0;vi<4;vi++){
     const y=24+vi*47, active=vi===editVoice;
@@ -485,8 +486,8 @@ function panelButton(ev){
       case 'EDIT': mode=(mode==='edit')?'grid':'edit'; break;   // EDIT toggle (03 §3.1)
       case 'ARP': mode='home'; break;               // v1: no Euclid page yet
       case 'GLO': gloHeld=true; break;               // modifier: rest of this down-mask = shifted
-      case 'OCT-': octShift(-1); break;              // GRID: keyboard shift −12 (rev.7); EDIT: cursor−
-      case 'OCT+': if(mode==='edit'){cursor=(cursor+63)&63;} else octShift(+1); break;
+      case 'OCT-': if(mode==='edit'){cursor=Math.max(0,cursor-1);} else octShift(-1); break;  // EDIT: cursor− dead-stop
+      case 'OCT+': if(mode==='edit'){cursor=Math.min(63,cursor+1);} else octShift(+1); break;
       case 'REC': M._ds_toggle_step_wasm(selTrack,cursor); break;  // v1: REC=cursor toggle
       case 'HOME': mode = mode==='home'?'grid':'home'; page=0; break;
       case 'PLAY': break;                              // handled on release edge (toggle)
