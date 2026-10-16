@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r14d 10-16';
+const BUILD='r14f 10-16';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -143,16 +143,38 @@ function drawHome(){
         ctx.fillRect(px,y,w/64-0.5,barH);
       }
       ctx.globalAlpha=1;
+      const isDrum=trkU8(t,'channel')===9;
       for(let s=0;s<STEPS;s++){
-        if(stepU8(t,s,'on')&&stepU8(t,s,'nvoices')){
-          const rel=(s+64-start)&63;
-          if(rel<len){
-            const px=x0+s*w/64;
-            ctx.globalAlpha= stepU8(t,s,'prob')<100?0.55:1;
-            ctx.fillStyle=COLORS[t];
-            ctx.fillRect(px,y,Math.max(1.5,w/64-1),barH);
-            ctx.globalAlpha=1;
+        const nv=stepU8(t,s,'nvoices');
+        if(!stepU8(t,s,'on')||!nv) continue;
+        const rel=(s+64-start)&63;
+        if(rel>=len) continue;
+        const px=x0+s*w/64, bw=Math.max(1.5,w/64-1);
+        if(isDrum){
+          // rev.14e: 2.75px block can't hold a dot matrix — horizontal mini-lines instead:
+          // each distinct drum in the step = one 1px line stacked top->bottom in lane order
+          // (same lane order/colors as the DRUM GRID). Melodic rows keep the solid block.
+          ctx.fillStyle=COLORS[t];
+          ctx.globalAlpha=0.18; ctx.fillRect(px,y,bw,barH); ctx.globalAlpha=1;
+          let mask=0;
+          const vB=trkOff(t)+TK.steps+s*ST.size+ST.voices;
+          for(let vi=0;vi<nv;vi++){
+            const dn=H8[S+vB+vi*4];
+            const li=GM_DRUMS.indexOf(dn);
+            if(li>=0) mask|=1<<li;
           }
+          let row=0;
+          for(let li=0;li<9&&row<4;li++){                 // 11px bar fits 4 lines of (1+2)
+            if(!(mask&(1<<li))) continue;
+            ctx.fillStyle=DPAL[li%DPAL.length];
+            ctx.fillRect(px,y+1+row*3,Math.max(1.5,bw),1.5);
+            row++;
+          }
+        } else {
+          ctx.globalAlpha= stepU8(t,s,'prob')<100?0.55:1;
+          ctx.fillStyle=COLORS[t];
+          ctx.fillRect(px,y,bw,barH);
+          ctx.globalAlpha=1;
         }
       }
       const pos=i32(OFF.pos16+t*4);
