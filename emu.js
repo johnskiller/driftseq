@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r14f 10-16';
+const BUILD='r14g 10-16';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -188,10 +188,11 @@ function drawHome(){
     flash[t]*=0.88;
   }
   ctx.fillStyle='#181820'; ctx.fillRect(0,220,CH,20);
-  ctx.fillStyle='#8a8a99'; ctx.font='10px monospace';
-  ctx.fillText('K1 START   K2 LEN   K3 MUTE   K4 PROB',6,233);
+  ctx.font='10px monospace';                     // rev.14g: no K-prefixes (fixed knob row, John)
+  const HX=[8,72,132,188];
+  ['START','LEN','MUTE','PROB'].forEach((l,i)=>{ ctx.fillStyle='#8a8a99'; ctx.fillText(l,HX[i],233); });
   ctx.fillStyle='#4a4a54'; ctx.font='8px monospace';
-  ctx.fillText(BUILD,180,233);                   // build stamp every page (John: verify freshness at a glance)
+  ctx.fillText(BUILD,234,238);                   // build stamp every page (John: verify freshness at a glance)
 }
 
 /* ---------- the screen: SEQ grid (03-screens) ---------- */
