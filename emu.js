@@ -230,7 +230,7 @@ function drawGrid(){
     if(c===0){ctx.fillStyle='#8a8a99';ctx.fillText(`P${r+1}`,3,y+11);}   // row = page label
   }
   ctx.fillStyle='#8a8a99'; ctx.font='10px monospace';
-  ctx.fillText('K1 START  K2 LEN  K3 DIV  K4 CH',18,233);
+  ctx.fillText('K1 step  K2 len  K3 mute  K4 prob',18,233);   // rev.8: matches panelEnc roles (was stale PLAY labels)
 }
 
 /* ---------- the screen: drum lanes (03 §2.3 — ALL drums visible, selected lane lit) ---------- */
@@ -317,16 +317,16 @@ function liveNote(keyIdx,down){                  // panel key -> live preview no
 function stepEntry(pressed,down,released){
   if(!down||(!Array.isArray(pressed)&&!Array.isArray(released))) return;
   const t=selTrack;
-  const start=trkU8(t,'loop_start'), len=trkU8(t,'loop_len');
-  if(((cursor+64-start)&63)>=len) cursor=start;   // resync into the window
   for(const keyIdx of (pressed||[])){
     liveNote(keyIdx,true);                        // hear it now
-    let note = trkU8(t,'channel')===9 ? [36,38,42,46,49,45,41,43,51,47,39,56,37,54,40,58,62,63,27,34][keyIdx%20] : 53+keyIdx;
+    let note;
+    if(trkU8(t,'channel')===9) note=GM_DRUMS[KEY_BLACK_IDX.indexOf(keyIdx)>=0?KEY_BLACK_IDX.indexOf(keyIdx):0];
+    else note=53+keyIdx;
     note=Math.max(0,Math.min(127,note+keyShift)); // rev.7: OCT± shifts the written pitch (F3–G5 constraint)
     M._ds_voice_add_wasm(t,cursor,note,100,1);
   }
   for(const keyIdx of (released||[])) liveNote(keyIdx,false);   // key up -> note-off
-  if(pressed&&pressed.length) cursor=(start+(((cursor+64-start)+1)%len))&63;  // advance inside the window
+  if(pressed&&pressed.length) cursor=(cursor+1)&63;  // rev.8: advance 0..63 (window gates playback, not entry)
 }
 
 /* ---------- rev.5 cursor axis + OCT rest/tie (02 §2.1 rev.3-5) ----------
@@ -335,10 +335,8 @@ function stepEntry(pressed,down,released){
  * on the cursor step WITHOUT moving; OCT− = back (same as K1 left, paired). */
 let gloHeld=false, restState=new Map();          // restState: step -> 0 none / 1 rest / 2 tie / 3 original-gate
 function cursorMove(n){                          // n = detents (+ fwd / - back)
-  const t=selTrack;
-  const start=trkU8(t,'loop_start'), len=trkU8(t,'loop_len');
   const step=(gloHeld?16:1)*(n>0?1:-1)*Math.abs(n);
-  cursor=(start+(((cursor+64-start)+step)%len+len)%len)&63;   // stay inside the window
+  cursor=((cursor+step)%64+64)%64;               // rev.8: full 0..63 — loop window gates playback, not editing
 }
 /* ---------- rev.7: OCT± = keyboard interval shift while in GRID (John: the F3–G5
  * keybed is only ~2 octaves — OCT must shift the write pitch, not flip pages) ---------- */
@@ -429,24 +427,27 @@ function drawEdit(){
   if(condZoom>0) condZoom--;
 }
 
-/* ---------- EDIT page keys (03 §3.2): black key = add voice + make active;
- * same-note replay on the active card = remove it (STEP-ENTRY semantics reused) ---------- */
+/* ---------- EDIT page keys (03 §3.2): any key = add voice at its pitch + make active;
+ * same-note replay on the active card = remove it (STEP-ENTRY semantics reused).
+ * rev.8: white keys write too (John: black-key-only was arbitrary — the keybed is
+ * the input surface in EDIT just like in GRID). Drums map through GM_DRUMS. ---------- */
 function editKeyHandler(pressed,down,released){
   const t=selTrack, s=cursor;
+  const isDrum=trkU8(t,'channel')===9;
   for(const k of (pressed||[])){
     liveNote(k,true);                              // hear it
-    if(KEY_BLACK.has(k)){
-      const note=53+k;                             // black key pitch (F#=54 etc.)
-      const vB=trkOff(t)+TK.steps+s*ST.size+ST.voices;
-      let hit=-1;
-      for(let vi=0;vi<stepU8(t,s,'nvoices');vi++) if(H8[S+vB+vi*4]===note) hit=vi;
-      if(hit>=0) M._ds_voice_remove_wasm(t,s,note);            // same note = remove
-      else if(stepU8(t,s,'nvoices')<4){
-        M._ds_voice_add_wasm(t,s,note,100,4);
-        editVoice=stepU8(t,s,'nvoices')-1;                     // new voice becomes active
-      }
+    const note=isDrum
+      ? GM_DRUMS[KEY_BLACK_IDX.indexOf(k)>=0?KEY_BLACK_IDX.indexOf(k):KEY_WHITE.indexOf(k)%GM_DRUMS.length]
+      : 53+k;
+    if(note<0) continue;                           // drum track, unmapped key
+    const vB=trkOff(t)+TK.steps+s*ST.size+ST.voices;
+    let hit=-1;
+    for(let vi=0;vi<stepU8(t,s,'nvoices');vi++) if(H8[S+vB+vi*4]===note) hit=vi;
+    if(hit>=0) M._ds_voice_remove_wasm(t,s,note);            // same note = remove
+    else if(stepU8(t,s,'nvoices')<4){
+      M._ds_voice_add_wasm(t,s,note,100,4);
+      editVoice=stepU8(t,s,'nvoices')-1;                     // new voice becomes active
     }
-    // white keys = audition only (no write — protect the pattern from stray fingers)
   }
   for(const k of (released||[])) liveNote(k,false);
 }
