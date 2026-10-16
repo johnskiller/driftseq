@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r14c 10-16';
+const BUILD='r14d 10-16';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -245,20 +245,28 @@ function drawEditPanel(y0){                       // y0=96 (melodic, 4 compact c
     ctx.fillStyle=`hsl(${hue},${Math.round(72*desat)}%,52%)`;
     ctx.fillRect(3,y+1,Math.max(3,(CH-6)*frac),cardH-2);         // bar length = gate
     if(v.gate===0xFF&&playing){ctx.fillStyle='#fff';ctx.fillRect(CH-6,y+1,3,cardH-2);}
-    // text on top, 11px, dark 1px shadow keeps it readable on bright or dark bars
+    // text on top, 11px, dark 1px shadow; note name padded to 3 chars so the
+    // numeric columns align no matter the note-name length (C4 vs C#4 vs G#5)
     ctx.font='11px monospace';
-    const txt=`v${vi+1}${sym} ${nm2} g${g2} v${v.vel} p${prob}`;
-    ctx.fillStyle='rgba(0,0,0,.85)'; ctx.fillText(txt,7,y+17);
-    ctx.fillStyle=active?'#fff4d6':'#f0f0f6'; ctx.fillText(txt,7,y+16);
+    const nm3=(nm2+'   ').slice(0,3);
+    const segs=[`v${vi+1}${sym}`,nm3,`g${g2}`,`v${v.vel}`,`p${prob}`];
+    const xs=[7,34,84,140,188];                       // fixed columns
+    segs.forEach((sg,i)=>{
+      ctx.fillStyle='rgba(0,0,0,.85)'; ctx.fillText(sg,xs[i]+1,y+17);
+      ctx.fillStyle=active?'#fff4d6':'#f0f0f6'; ctx.fillText(sg,xs[i],y+16);
+    });
   }
 }
-const FOOT_GRID=['K1 step','K2 len','K3 mute','K4 prob'];
-const FOOT_EDIT=['K1 pit','K2 gat','K3 vel','K4 prob','SEL v'];
+const FOOT_GRID=['STEP','LEN','MUTE','PROB'];
+const FOOT_EDIT=['PIT','GAT','VEL','PROB','SEL'];
+const FOOT_X=[8,72,132,188];                       // fixed columns under K1..K4 (no 'K1' prefix)
 function drawFooter(editFocus){
   ctx.fillStyle='#181820'; ctx.fillRect(0,216,CH,24);
-  ctx.fillStyle= editFocus?'#e6c84a':'#8a8a99'; ctx.font='8px monospace';
-  ctx.fillText((editFocus?FOOT_EDIT:FOOT_GRID).join('  '),18,233);
-  ctx.fillStyle='#4a4a54'; ctx.fillText(BUILD,164,233);
+  ctx.font='10px monospace';                        // bigger: K labels are implicit (fixed row)
+  const labels=editFocus?FOOT_EDIT:FOOT_GRID, col=editFocus?'#e6c84a':'#8a8a99';
+  for(let i=0;i<4;i++){ ctx.fillStyle=col; ctx.fillText(labels[i],FOOT_X[i],233); }
+  if(editFocus){ ctx.fillStyle='#e6c84a'; ctx.fillText(labels[4],FOOT_X[3]+40,233); } // SEL after PROB
+  ctx.fillStyle='#4a4a54'; ctx.font='8px monospace'; ctx.fillText(BUILD,164,238);
 }
 
 /* ---------- the screen: drum lanes (03 §3 — ALL drums visible, selected lane lit) ---------- */
