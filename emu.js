@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r14g 10-16';
+const BUILD='r15 10-16';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -378,6 +378,130 @@ function chordName(t,s){                         // 'Cmaj7' style: root + qualit
   return q===null ? vs.map(v=>NAMES[v.note%12]).join(' ') : NAMES[root]+q;
 }
 
+/* ---------- the screen: ARP / Euclid page (03 §4, rev.15) ----------
+ * Ring = the pattern's shape (n ticks, k pulse dots, north = slot 0, clockwise);
+ * strip = the filled result in loop context (hero row grammar). K1..K3 turn =
+ * re-fill immediately (en bits only, voices/prob untouched — idempotent). */
+function drawArp(){
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
+  ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,16);
+  ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
+  ctx.fillText(`ARP TRK ${selTrack+1}`,6,12);
+  const eu=trkU8(selTrack,'eu_on'), k0=trkU8(selTrack,'eu_k'), n0=trkU8(selTrack,'eu_n');
+  ctx.fillStyle= eu?'#5fe08a':'#6a6a76';
+  ctx.fillText(eu?'\u25cf LINK':'FREE',192,12);
+  // fresh track (never generated): hint instead of ring — show dims + button hint (03 §4.1)
+  if(!eu && k0===0 && n0===0){
+    ctx.fillStyle='#55555f'; ctx.font='13px monospace';
+    ctx.fillText('K4 \u2192 generate',70,118);
+    ctx.font='12px monospace';
+    ctx.fillStyle='#8a8a99';
+    ctx.fillText('K \u2013    N \u2013    ROT \u2013',64,208);
+    ctx.fillStyle='#e6c84a';
+    ctx.fillText('ARP v1.1',168,208);
+    drawFooterArp(); return;
+  }
+  const n=n0||16, k=Math.min(k0,n), rot=trkU8(selTrack,'eu_rot')%n;
+  // pattern via the ENGINE's own math (read steps the fill wrote — but for the ring
+  // we need the pre-window pattern: recompute in JS, same Bjorklund)
+  const pat=bjorklundJS(n,k);
+  // ---- 64-step result strip (hero row grammar) ----
+  const sy=16, sh=12, sx=56, sw=176;
+  ctx.fillStyle='#181820'; ctx.fillRect(0,sy,CH,sh);
+  const start=trkU8(selTrack,'loop_start'), len=trkU8(selTrack,'loop_len');
+  ctx.fillStyle='#22222a'; ctx.fillRect(sx,sy,sw,sh);
+  ctx.fillStyle='#2a2a33';
+  for(let i=0;i<len;i++){ const px=sx+((start+i)&63)*sw/64; ctx.fillRect(px,sy,sw/64-0.5,sh); }
+  const isDrum=trkU8(selTrack,'channel')===9;
+  const tcol=COLORS[selTrack];
+  for(let st=0;st<64;st++){
+    const rel=(st+64-start)&63;
+    if(rel>=len) continue;
+    const idx=((rel%n)+n-rot%n)%n;
+    if(!pat[idx]) continue;
+    const on=stepU8(selTrack,st,'on');
+    if(!on) continue;                                   // rest: en=0, ring shows shape anyway
+    const px=sx+st*sw/64, bw=Math.max(1.5,sw/64-1);
+    if(isDrum){
+      ctx.fillStyle=tcol; ctx.globalAlpha=0.18; ctx.fillRect(px,sy,bw,sh); ctx.globalAlpha=1;
+      const vB=trkOff(selTrack)+TK.steps+st*ST.size+ST.voices;
+      const nv=stepU8(selTrack,st,'nvoices');
+      let row=0;
+      for(let li=0;li<9&&row<4;li++){
+        const dn=GM_DRUMS[li]; let hit=false;
+        for(let vi=0;vi<nv;vi++) if(H8[S+vB+vi*4]===dn) hit=true;
+        if(hit){ ctx.fillStyle=DPAL[li%DPAL.length]; ctx.fillRect(px,sy+1+row*3,Math.max(1.5,bw),1.5); row++; }
+      }
+    } else {
+      ctx.fillStyle=tcol; ctx.fillRect(px,sy,bw,sh);
+    }
+  }
+  const pos=i32(OFF.pos16+selTrack*4);
+  if(playing){ const rel=(pos+64-start)&63; if(rel<len){ ctx.fillStyle='#fff'; ctx.fillRect(sx+pos*sw/64-1,sy,2,sh); } }
+  // gutter labels for the strip
+  ctx.fillStyle='#6a6a76'; ctx.font='8px monospace';
+  ctx.fillText('LOOP',30,sy+9);
+  // ---- ring ----
+  const cx=120, cy=112, r=76;
+  ctx.strokeStyle='#3a3a44'; ctx.beginPath(); ctx.arc(cx,cy,r+4,0,Math.PI*2); ctx.stroke();
+  const ringDots=[];
+  for(let i=0;i<n;i++){
+    const ang=-Math.PI/2 + i*Math.PI*2/n;               // north = slot 0, clockwise
+    const px=cx+Math.cos(ang)*r, py=cy+Math.sin(ang)*r;
+    const pulse=pat[((i%n)+n-Math.floor(rot))%n];       // same rotation as the strip/en fill
+    if(pulse){ ringDots.push([px,py]); }                // drawn last, above everything
+    else {
+      ctx.fillStyle= n>32 ? '#4a4a54' : '#6a6a76';
+      const ts=n>32?1:2;
+      ctx.fillRect(px-ts/2,py-ts/2,ts,ts);
+    }
+    if(i===0){ ctx.strokeStyle='#8a8a99'; ctx.beginPath(); ctx.moveTo(px,py);
+      const ang2=-Math.PI/2; ctx.lineTo(cx+Math.cos(ang2)*(r-10),cy+Math.sin(ang2)*(r-10)); ctx.stroke(); }
+  }
+  for(const [dx,dy] of ringDots){
+    ctx.fillStyle=COLORS[selTrack];
+    ctx.beginPath(); ctx.arc(dx,dy,3.4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    ctx.beginPath(); ctx.arc(dx,dy,1.2,0,Math.PI*2); ctx.fill();
+  }
+  // playhead: relative position inside the window mapped to the ring
+  if(playing){
+    const rel=(pos+64-start)&63;
+    if(rel<len){ const ph=(rel% n); const ang=-Math.PI/2 + ph*Math.PI*2/n;
+      const px=cx+Math.cos(ang)*(r+8), py=cy+Math.sin(ang)*(r+8);
+      ctx.strokeStyle='#fff'; ctx.beginPath(); ctx.arc(px,py,2,0,Math.PI*2); ctx.stroke(); }
+  }
+  // ---- numbers row ----
+  ctx.fillStyle='#181820'; ctx.fillRect(0,196,CH,20);
+  ctx.font='12px monospace';
+  const nxs=[10,64,118,168];
+  ctx.fillStyle='#f0f0f6'; ctx.fillText(`K ${k}`,nxs[0],210);
+  ctx.fillText(`N ${n}`,nxs[1],210);
+  ctx.fillText(`ROT ${rot}`,nxs[2],210);
+  ctx.fillStyle='#e6c84a'; ctx.fillText('ARP v1.1',nxs[3],210);
+  drawFooterArp();
+}
+function drawFooterArp(){
+  ctx.fillStyle='#181820'; ctx.fillRect(0,216,CH,24);
+  ctx.font='10px monospace';
+  ['K','N','ROT','LINK'].forEach((l,i)=>{ ctx.fillStyle='#8a8a99'; ctx.fillText(l,FOOT_X[i],233); });
+  ctx.fillStyle='#4a4a54'; ctx.font='8px monospace'; ctx.fillText(BUILD,164,238);
+}
+/* Bjorklund (JS mirror of host/driftseq.c — ring needs the pre-window pattern) */
+function bjorklundJS(n,k){
+  if(k<=0) return new Array(n).fill(0);
+  if(k>=n) return new Array(n).fill(1);
+  let A=Array(k).fill().map(()=>[1]), B=Array(n-k).fill().map(()=>[0]);
+  while(B.length>1){
+    const m=Math.min(A.length,B.length), NA=[], NB=[];
+    for(let i=0;i<m;i++) NA.push([...A[i],...B[i]]);
+    for(let i=m;i<A.length;i++) NB.push(A[i]);
+    for(let i=m;i<B.length;i++) NB.push(B[i]);
+    A=NA; B=NB;
+  }
+  return A.flat().concat(B.flat());
+}
+
 /* ---------- step-entry is the DEFAULT state (02 §2.1 rev.5): key press writes the cursor step ---------- */
 let cursor=0;                                    // absolute step 0..63 — always present, cursor = selection
 const liveHeld=new Set();                        // panel keys currently sounding (note-off dedup)
@@ -599,7 +723,7 @@ function frame(t){
   if(dt>0.25)dt=0.25;
   try{
     M._ds_tick_wasm(dt); readMidiOut();          // tick always: live note-offs must drain even when stopped
-    if(mode==='home')drawHome(); else drawGrid();      // rev.12: edit = embedded panel
+    if(mode==='home')drawHome(); else if(mode==='arp')drawArp(); else drawGrid();  // rev.15: + ARP page
   }catch(e){ crashBeacon('frame: '+e.message); lastT=0; }  // log it; next rAF retries
   rafId=requestAnimationFrame(frame);
 }
@@ -619,7 +743,7 @@ function panelButton(ev){
         if(mode==='grid'||mode==='edit'){ mode='grid'; focusLayer=(focusLayer==='edit')?'grid':'edit'; }
         else mode='grid';
         break;
-      case 'ARP': mode='home'; break;               // v1: no Euclid page yet
+      case 'ARP': mode='arp'; break;                // rev.15: Euclid page live (03 §4)
       case 'GLO': gloHeld=true; break;               // modifier: rest of this down-mask = shifted
       case 'OCT-':                                     // rev.11 OCT cluster: GLO+OCT- = back 1 (play/edit axis)
         if(mode==='grid'){ if(gloHeld||focusLayer==='edit') cursor=Math.max(0,cursor-1); else octShift(-1); }
@@ -657,6 +781,39 @@ function clearHeldMirrors(){
 }
 function bitName(bit){ return Object.entries(DSPanel.B).find(([n,b])=>b===bit)?.[0]; }
 function panelEnc(role,n){
+  if(mode==='arp'){                                        // ---- ARP page (03 §4.1) ----
+    const t=selTrack;
+    if(role===0){                                          // SELECT: track, NO wrap (global)
+      const next=Math.max(0,Math.min(15,selTrack+(n>0?1:-1)));
+      if(next!==selTrack) selectTrack(next); return;
+    }
+    if(role>=3&&role<=6){
+      const eu=trkU8(t,'eu_on'); let k=trkU8(t,'eu_k'), nn=trkU8(t,'eu_n'), rot=trkU8(t,'eu_rot');
+      if(role===6){                                        // K4 LINK
+        if(n>0){
+          M._ds_euclid_wasm(t,1,k||4,nn||16,rot);          // right: link + fill (defaults 4/16)
+          // seed default voices into empty on-steps (03 §4.2: drum=选鼓, melodic=C3 #13);
+          // idempotent — re-link only fills steps the user hasn't touched (nvoices==0)
+          const isDrum=trkU8(t,'channel')===9;
+          for(let st=0;st<64;st++){
+            if(stepU8(t,st,'on') && stepU8(t,st,'nvoices')===0){
+              if(isDrum) M._ds_voice_add_wasm(t,st,GM_DRUMS[drumSel],100,1);
+              else       M._ds_voice_add_wasm(t,st,48,100,4);   // C3 — #13 open
+            }
+          }
+        }
+        else if(eu){ M._ds_euclid_wasm(t,0,k,nn,rot); }    // left: freeze steps, keep meta
+        return;
+      }
+      if(!nn){ nn=16; }                                    // fresh meta defaults
+      if(role===3){ k=Math.max(1,Math.min(nn,k+n)); }      // K1: 1..N clamp
+      if(role===4){ nn=Math.max(2,Math.min(64,nn+n)); k=Math.min(k,nn); }  // K2: 2..64, clamp k
+      if(role===5){ rot=Math.max(0,Math.min(nn-1,rot+n)); } // K3: 0..N-1 dead-stop
+      M._ds_euclid_wasm(t,1,k,nn,rot);                     // every turn = re-fill (en bits only)
+      return;
+    }
+    return;                                                // ALGORITHM/PRESETS: unsignaled here
+  }
   const editFocus=(focusLayer==='edit'&&mode==='grid');     // rev.12: EDIT layer focus
   if(editFocus){                                            // ---- EDIT layer (03 §4) ----
     const t=selTrack, s=cursor;
@@ -845,7 +1002,9 @@ async function boot(){
   };
   TK={stride:M._ds_track_stride(), channel:M._ds_trk_off_channel(), prog:M._ds_trk_off_prog(),
       loop_start:M._ds_trk_off_loop_start(), loop_len:M._ds_trk_off_loop_len(),
-      division:M._ds_trk_off_division(), mute:M._ds_trk_off_mute(), steps:M._ds_trk_off_steps()};
+      division:M._ds_trk_off_division(), mute:M._ds_trk_off_mute(), steps:M._ds_trk_off_steps(),
+      eu_on:M._ds_trk_off_eu_on(), eu_k:M._ds_trk_off_eu_k(), eu_n:M._ds_trk_off_eu_n(),
+      eu_rot:M._ds_trk_off_eu_rot()};
   ST={size:M._ds_step_size(), on:M._ds_step_off_on(), nvoices:M._ds_step_off_nvoices(),
       prob:M._ds_step_off_prob(), voices:M._ds_step_off_voices(), cond:M._ds_step_off_cond()};
 
