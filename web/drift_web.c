@@ -131,6 +131,10 @@ EMSCRIPTEN_KEEPALIVE
 int ds_trk_off_eu_k(void)    { ds_track t; return (int)((uintptr_t)&t.eu_k - (uintptr_t)&t); }
 EMSCRIPTEN_KEEPALIVE
 int ds_trk_off_eu_n(void)    { ds_track t; return (int)((uintptr_t)&t.eu_n - (uintptr_t)&t); }
+EMSCRIPTEN_KEEPALIVE
+int ds_trk_off_eu_on(void)   { ds_track t; return (int)((uintptr_t)&t.eu_on - (uintptr_t)&t); }
+EMSCRIPTEN_KEEPALIVE
+int ds_trk_off_eu_rot(void)  { ds_track t; return (int)((uintptr_t)&t.eu_rot - (uintptr_t)&t); }
 
 /* ---- live keyboard (step-entry preview + held notes) ---- */
 /* notes held via the panel keyboard: engine emits note-offs when the gate
