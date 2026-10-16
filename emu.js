@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r14 10-16';
+const BUILD='r14a 10-16';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -531,22 +531,30 @@ function drawEdit(){  // DEPRECATED rev.12 — embedded panel replaced standalon
  * same-note replay on the active card = remove it (STEP-ENTRY semantics reused).
  * rev.8: white keys write too (John: black-key-only was arbitrary — the keybed is
  * the input surface in EDIT just like in GRID). Drums map through GM_DRUMS. ---------- */
-function editKeyHandler(pressed,down,released){
+function editKeyHandler(pressed,down,released){   // rev.14a: EDIT layer — cursor NEVER advances
   const t=selTrack, s=cursor;
   const isDrum=trkU8(t,'channel')===9;
   for(const k of (pressed||[])){
     liveNote(k,true);                              // hear it
     const note=isDrum
       ? GM_DRUMS[KEY_BLACK_IDX.indexOf(k)>=0?KEY_BLACK_IDX.indexOf(k):KEY_WHITE.indexOf(k)%GM_DRUMS.length]
-      : 53+k;
-    if(note<0) continue;                           // drum track, unmapped key
+      : Math.max(0,Math.min(127,53+k+keyShift));
+    if(isDrum&&note<0) continue;                   // drum track, unmapped key
     const vB=trkOff(t)+TK.steps+s*ST.size+ST.voices;
     let hit=-1;
     for(let vi=0;vi<stepU8(t,s,'nvoices');vi++) if(H8[S+vB+vi*4]===note) hit=vi;
-    if(hit>=0) M._ds_voice_remove_wasm(t,s,note);            // same note = remove
-    else if(stepU8(t,s,'nvoices')<4){
+    if(hit>=0){                                    // same note = delete that voice (any card)
+      M._ds_voice_remove_wasm(t,s,note);
+      if(editVoice>=stepU8(t,s,'nvoices')) editVoice=Math.max(0,stepU8(t,s,'nvoices')-1);
+      continue;
+    }
+    const nv=stepU8(t,s,'nvoices');
+    if(nv<4){
       M._ds_voice_add_wasm(t,s,note,100,4);
-      editVoice=stepU8(t,s,'nvoices')-1;                     // new voice becomes active
+      editVoice=nv;                                // new voice becomes active
+    } else {                                       // rev.11: full slot -> replace v4 (lowest priority)
+      M._ds_note_set_wasm(t,s,3,note,-1,-1);
+      editVoice=3;
     }
   }
   for(const k of (released||[])) liveNote(k,false);
@@ -813,13 +821,16 @@ async function boot(){
   DSPanel.build();
   DSPanel.onButton(panelButton);
   DSPanel.onKey((pressed,down,released)=>{       // drum grid edits go through the drum handler;
-    if(mode==='grid' && trkU8(selTrack,'channel')===9) drumKeyHandler(pressed,down,released);
-    else if(mode==='grid') stepEntry(pressed,down,released);       // melodic: step-entry is the default state (rev.5)
-    else if(mode==='edit') editKeyHandler(pressed,down,released);  // EDIT: black key = add+activate voice
-    else {                                        // PLAY page: keys = live audition only
+    if(mode!=='grid'){                            // PLAY page: keys = live audition only
       for(const k of (pressed||[])) liveNote(k,true);
       for(const k of (released||[])) liveNote(k,false);
+      return;
     }
+    if(focusLayer==='edit'){                      // rev.14a: EDIT layer — keys edit voices, cursor stays
+      editKeyHandler(pressed,down,released); return;
+    }
+    if(trkU8(selTrack,'channel')===9) drumKeyHandler(pressed,down,released);
+    else stepEntry(pressed,down,released);        // melodic grid layer: override step-entry (rev.11)
   });
   DSPanel.onEnc(panelEnc);
 
