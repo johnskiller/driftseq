@@ -153,23 +153,59 @@ uint8_t ds_step_active(const ds_track *t, uint32_t step) {
     return t->steps[i].nvoices > 0 && t->steps[i].on;
 }
 
-/* Bjorklund: k pulses over n slots (Toussaint's euclidean rhythm paper) */
+/* Euclid: k pulses over n slots — real Bjorklund (Toussaint 2005, 03 §4.2).
+ * Bucket algorithm: pair A-buckets (1s) with B-buckets (0s) while more than one
+ * B-bucket remains; leftovers of the longer list become the new B list; output =
+ * A buckets then B buckets. Canonical phase verified against the paper:
+ * E(8,3)=tresillo x..x..x., E(5,12)=Venda x..x.x..x.x., E(5,16)=bossa necklace,
+ * E(7,16)=samba necklace (host/test_euclid.c). Scratch = 2×64 buckets × 64B = 8 KiB
+ * stack — fine on host; firmware port: reuse a shared scratch buffer instead.
+ * rot shifts pulses later: on(i) = pat[(rel - rot) mod n], rel from loop_start.
+ * Fill writes ONLY en bits (voices/vel/gate/prob untouched — re-fill idempotent). */
 static void bjorklund(int n, int k, uint8_t *out) {
-    int bucket = 0, i;
-    for (i = 0; i < n; i++) {
-        bucket += k;
-        if (bucket >= n) { bucket -= n; out[i] = 1; }
-        else out[i] = 0;
+    static uint8_t A[64][64], B[64][64];            /* static: 8 KiB not on the fw stack */
+    static uint8_t nA[64][64], nB[64][64];
+    int alen[64], blen[64], nal[64], nbl[64];
+    int na = k, nb = n - k, i, j;
+    if (k <= 0) { for (i = 0; i < n; i++) out[i] = 0; return; }
+    if (k >= n) { for (i = 0; i < n; i++) out[i] = 1; return; }
+    for (i = 0; i < na; i++) { A[i][0] = 1; alen[i] = 1; }
+    for (i = 0; i < nb; i++) { B[i][0] = 0; blen[i] = 1; }
+    while (nb > 1) {
+        int m = na < nb ? na : nb, nna = m, nnb = 0;
+        for (i = 0; i < m; i++) {                    /* pair: A[i] then B[i] */
+            for (j = 0; j < alen[i]; j++) nA[i][j] = A[i][j];
+            for (j = 0; j < blen[i]; j++) nA[i][alen[i] + j] = B[i][j];
+            nal[i] = alen[i] + blen[i];
+        }
+        for (i = m; i < na; i++) {                   /* leftover A waits in the B list */
+            for (j = 0; j < alen[i]; j++) nB[nnb][j] = A[i][j];
+            nbl[nnb++] = alen[i];
+        }
+        for (i = m; i < nb; i++) {                   /* leftover B waits too */
+            for (j = 0; j < blen[i]; j++) nB[nnb][j] = B[i][j];
+            nbl[nnb++] = blen[i];
+        }
+        for (i = 0; i < nna; i++) { for (j = 0; j < nal[i]; j++) A[i][j] = nA[i][j]; alen[i] = nal[i]; }
+        for (i = 0; i < nnb; i++) { for (j = 0; j < nbl[i]; j++) B[i][j] = nB[i][j]; blen[i] = nbl[i]; }
+        na = nna; nb = nnb;
+    }
+    {   int w = 0;                                   /* paper: output = A buckets ++ B buckets */
+        for (i = 0; i < na; i++) for (j = 0; j < alen[i]; j++) out[w++] = A[i][j];
+        for (i = 0; i < nb; i++) for (j = 0; j < blen[i]; j++) out[w++] = B[i][j];
     }
 }
 void ds_euclid_fill(ds_track *t) {
     uint8_t pat[64];
     int i, n = t->eu_n ? t->eu_n : 16, k = t->eu_k;
     if (k > n) k = n;
+    if (k < 0) k = 0;
     bjorklund(n, k, pat);
     for (i = 0; i < DS_STEPS; i++) {
         uint32_t rel = (i + 64 - t->loop_start) & 63;
-        t->steps[i].on = rel < (uint32_t)t->loop_len ? pat[rel % n] : 0;
+        uint32_t rot = t->eu_rot % (uint32_t)n;
+        uint32_t idx = rel >= rot ? rel - rot : rel + (uint32_t)n - rot;
+        t->steps[i].on = rel < (uint32_t)t->loop_len ? pat[idx] : 0;
     }
 }
 

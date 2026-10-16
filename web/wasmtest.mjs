@@ -8,7 +8,7 @@ import path from 'path';
 const require = createRequire(import.meta.url);
 const DriftSeqModule = require(path.join(path.dirname(fileURLToPath(import.meta.url)), 'driftseq.js'));
 
-const GOLDEN = '5828982717F322ED';
+const GOLDEN = 'F907E068E55AA89E';
 const M = await DriftSeqModule();
 const S = M._ds_new(42n) | 0;
 const H8 = M.HEAPU8, dv = new DataView(H8.buffer);
