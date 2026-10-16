@@ -176,98 +176,177 @@ function drawHome(){
 function drawGrid(){
   if(trkU8(selTrack,'channel')===9) return drawDrumGrid();      // ch10 = drum lanes view
   ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
-  ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,20);
+  ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,16);
   ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
-  // top-right corner: cursor step + v0 note name (HOME uses this syntax for S nn)
-  const st0=stepU8(selTrack,cursor,'voices'), n0=(st0===0xFF)?null:st0;
-  const NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-  const nm = n0===null?'':` ${NAMES[n0%12]}${Math.floor(n0/12)-1}`;
-  ctx.fillText(`SEQ TRK ${selTrack+1} · p${page+1}/4`,6,14);
+  ctx.fillText(`SEQ TRK ${selTrack+1} · p1/4`,6,12);
   ctx.fillStyle= trkU8(selTrack,'mute')?'#5a5a62':'#5fe08a';
-  ctx.fillText(`st${cursor+1}${nm}`,186,14);
-  if(keyShift!==0){                              // rev.7: keyboard shift indicator (GRID only)
-    ctx.fillStyle='#e6c84a';
-    ctx.fillText(`${keyShift>0?'+':''}${keyShift}`,150,14);
-  }
-  const cols=16,rows=4, cw=(CH-28)/cols, chh=(CH-60)/rows;
+  const cn=chordName(selTrack,cursor);
+  ctx.fillText(`st${cursor+1}${cn?' '+cn:''}`,150,12);
+  if(keyShift!==0){ ctx.fillStyle='#e6c84a'; ctx.fillText(`${keyShift>0?'+':''}${keyShift}`,120,12); }
+  const cols=16,rows=4, x0=18, y0=16, gw=CH-x0, gh=96;          // rev.12: 4x24px bars
+  const cw=(gw-16)/cols, chh=gh/rows;
   const start=trkU8(selTrack,'loop_start'), len=trkU8(selTrack,'loop_len');
-  const isDrum=trkU8(selTrack,'channel')===9;
-  ctx.font='9px monospace';
+  ctx.font='8px monospace';
   for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
-    const s=page*0+r*16+c;                       // full overview: row = page, all 64 visible
-    const x=18+c*cw, y=24+r*chh;
-    const lit=(r===page)?1:0.45;                 // current keybed page row full-lit, others dimmed
+    const s=r*16+c;                                             // row = page-of-16, historical
+    const x=x0+c*cw, y=y0+r*chh;
     const rel=(s+64-start)&63, inWin=rel<len;
-    const on=stepU8(selTrack,s,'on')&&stepU8(selTrack,s,'nvoices');
-    const nv=stepU8(selTrack,s,'nvoices');
-    const vBase=trkOff(selTrack)+TK.steps+s*ST.size;           // voices[] = ds_note v[4]
-    // hue = pitch (12-semitone wheel, piano-roll convention). Drums too: GM note
-    // numbers cluster arbitrarily (36/38/42/46...), so raw pitch hue is meaningless
-    // — map through the emu's drum-key palette index instead (instrument = identity).
-    let fill;
-    if(on){
-      const v0n=H8[S+vBase];                                   // v[0].note
-      if(isDrum){
-        const gi=GM_DRUMS.indexOf(v0n);
-        fill=DPAL[(gi>=0?gi:0)%DPAL.length];
-      } else {
-        fill=`hsl(${v0n%12*30},70%,55%)`;
-      }
-      if(!inWin) fill='#555560';                 // outside loop window: greyed, still visible
-    } else fill=(r===page)?'#1d1d26':'#15151a';
-    ctx.globalAlpha=lit;
-    ctx.fillStyle=fill;
+    // rev.11/12: bg luminance = loop range (bright inside / dark outside), empty = plain
+    ctx.fillStyle=inWin?'#2a2a33':'#16161c';
     ctx.fillRect(x+1,y+1,cw-2,chh-2);
-    if(on&&!isDrum){                             // v1..3 stack: 3px hue strips at cell bottom
-      for(let vi=1;vi<Math.min(nv,4);vi++){
-        const vn=H8[S+vBase+vi*4];               // v[vi].note (ds_note = 4 bytes)
-        ctx.fillStyle=`hsl(${vn%12*30},70%,55%)`;
-        ctx.fillRect(x+1,y+chh-2-vi*3,cw-2,2);
+    const vs=sortedVoices(selTrack,s);                          // pitch-ascending, high on top
+    const on=stepU8(selTrack,s,'on');
+    for(let li=0;li<vs.length;li++){
+      const v=vs[li], lineY=y+chh-4-li*5;                       // slot i: bottom-up (high pitch top)
+      if(!on){                                                  // rest: hollow/dashed line
+        ctx.fillStyle='#666672'; ctx.fillRect(x+3,lineY,cw-6,1);
+      } else {
+        ctx.fillStyle=`hsl(${v.note%12*30},72%,55%)`;
+        ctx.fillRect(x+2,lineY,cw-4,2);
       }
     }
     const pos=i32(OFF.pos16+selTrack*4), isNow=playing&&pos===s;
     if(isNow){ctx.strokeStyle='#fff';ctx.strokeRect(x+1.5,y+1.5,cw-3,chh-3);}
-    if(cursor===s){ctx.strokeStyle='#e6c84a';ctx.strokeRect(x+0.5,y+0.5,cw-1,chh-1);}
-    if(stepU8(selTrack,s,'prob')<100&&on){ctx.fillStyle='#000';ctx.globalAlpha=.35*lit;ctx.fillRect(x+1,y+chh-7,cw-2,4);}
-    ctx.globalAlpha=1;
-    if(c===0){ctx.fillStyle='#8a8a99';ctx.fillText(`P${r+1}`,3,y+11);}   // row = page label
+    if(cursor===s){ctx.strokeStyle='#e6c84a';ctx.lineWidth=1.5;ctx.strokeRect(x+0.5,y+0.5,cw-1,chh-1);ctx.lineWidth=1;}
+    if(c===0){ctx.fillStyle='#8a8a99';ctx.fillText(`P${r+1}`,3,y+13);}
   }
-  ctx.fillStyle='#8a8a99'; ctx.font='8px monospace';
-  ctx.fillText('K1 step K2 len K3 mute K4 prob',18,233);   // rev.8: matches panelEnc roles (was stale PLAY labels)
+  drawEditPanel(96);                                            // rev.12: EDIT embedded, y=112..
+  drawFooter(['K1 step','K2 len','K3 mute','K4 prob'], focusLayer==='edit');
+}
+
+/* ---------- rev.12/13c: EDIT panel embedded at bottom of GRID (melodic 4 cards / drum 1 big card) ---------- */
+let focusLayer='grid';                            // 'grid' | 'edit' — EDIT button toggles
+function drawEditPanel(y0){                       // y0=96 (melodic, 4 compact cards) — drum calls its own
+  const t=selTrack, s=cursor;
+  const sBase=trkOff(t)+TK.steps+s*ST.size;
+  const vs=sortedVoices(t,s), nv=vs.length;
+  ctx.fillStyle='#101015'; ctx.fillRect(0,y0+16,CH,100);
+  ctx.fillStyle='#3a3a44'; ctx.fillRect(0,y0+16,CH,1);          // separator
+  const cardH=25;
+  for(let vi=0;vi<4;vi++){
+    const y=y0+16+vi*cardH, active=(focusLayer==='edit')&&vi===editVoice;
+    ctx.fillStyle=active?'#2e2e3a':'#16161b';
+    ctx.fillRect(2,y+1,CH-4,cardH-2);
+    if(active){ctx.strokeStyle='#e6c84a';ctx.strokeRect(2.5,y+1.5,CH-5,cardH-3);}
+    if(vi>=nv){
+      ctx.fillStyle='#55555f'; ctx.font='10px monospace';
+      ctx.fillText(`v${vi+1} ─ 空 (弹键加入)`,8,y+16); continue;
+    }
+    const v=vs[vi];
+    const on=stepU8(t,s,'on');
+    const sym=!on?'●':(playing&&i32(OFF.pos16+t*4)===s)?'▶':'○';
+    const nm2=`${NAMES[v.note%12]}${Math.floor(v.note/12)-1}`;
+    ctx.fillStyle=active?'#fff4d6':'#b9b9c4'; ctx.font='10px monospace';
+    ctx.fillText(`v${vi+1} ${sym} ${nm2}`,6,y+16);
+    // ---- param bar: right half (rev.13) ----
+    const bx=96, bw=CH-bx-8, by=y+5, bh=cardH-10;
+    ctx.fillStyle=`hsl(0,0%,${18+ (v.vel/127)*55}%)`;           // bg luminance = velocity
+    ctx.fillRect(bx,by,bw,bh);
+    const frac=(v.gate===0xFF)?1:Math.min(1,(v.gate/4)/8);      // gate 8.00 = full
+    const hue=v.note%12*30, sat=v.on===undefined?(stepU8(t,s,'prob')):stepU8(t,s,'prob');
+    const desat=stepU8(t,s,'prob')/100;                          // prob: 1=pure hue, 0=grey
+    ctx.fillStyle=`hsl(${hue},${Math.round(72*desat)}%,55%)`;
+    ctx.fillRect(bx,by,Math.max(2,bw*frac),bh);                  // bar length = gate
+    if(v.gate===0xFF&&playing){ctx.fillStyle='#fff';ctx.fillRect(bx+bw-2,by,2,bh);}
+  }
+  ctx.fillStyle='#55555f'; ctx.font='8px monospace';
+  if(focusLayer==='edit'){ ctx.fillStyle='#6a6a76'; ctx.fillText('K1 pit K2 gat K3 vel K4 prob SEL=v',96,y0+118); }
+}
+function drawFooter(labels,editFocus){
+  ctx.fillStyle='#181820'; ctx.fillRect(0,216,CH,24);
+  ctx.fillStyle= editFocus?'#e6c84a':'#8a8a99'; ctx.font='8px monospace';
+  ctx.fillText(labels.join('  '),18,233);
+  if(!editFocus){
+    ctx.fillStyle= trkU8(selTrack,'mute')?'#5a5a62':'#5fe08a';
+    ctx.fillText(`st${cursor+1}`,186,233);
+  }
   ctx.fillStyle='#4a4a54'; ctx.fillText(BUILD,164,233);
 }
 
-/* ---------- the screen: drum lanes (03 §2.3 — ALL drums visible, selected lane lit) ---------- */
+/* ---------- the screen: drum lanes (03 §3 — ALL drums visible, selected lane lit) ---------- */
 function drawDrumGrid(){
   ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
-  ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,20);
+  ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,16);
   ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
-  ctx.fillText(`DRUM TRK ${selTrack+1} · p${page+1}/4`,6,14);
+  ctx.fillText(`DRUM TRK ${selTrack+1} · p1/4`,6,12);
   ctx.fillStyle= trkU8(selTrack,'mute')?'#5a5a62':'#5fe08a';
-  ctx.fillText(GM_SHORT[drumSel]||('D'+drumSel),200,14);
-  const nL=GM_DRUMS.length, lh=Math.min(21,(CH-40)/nL), x0=34;
+  ctx.fillText(`st${cursor+1} ${GM_SHORT[drumSel]||('D'+drumSel)}`,150,12);
+  const nL=GM_DRUMS.length, lh=11, x0=30, y0=16;               // rev.13b: 9x11px lanes
   const pos=i32(OFF.pos16+selTrack*4);
   ctx.font='8px monospace';
   for(let li=0;li<nL;li++){
-    const y=24+li*lh, sel=li===drumSel;
+    const y=y0+li*lh, sel=li===drumSel;
     ctx.fillStyle=sel?'#c9c9d4':'#6a6a76';
-    ctx.fillText(GM_SHORT[li],2,y+lh-6);
+    ctx.fillText(GM_SHORT[li],2,y+lh-3);
     for(let c=0;c<16;c++){
       const s=page*16+c;
       const vBase=trkOff(selTrack)+TK.steps+s*ST.size;
       let on=false;
       for(let vi=0;vi<stepU8(selTrack,s,'nvoices');vi++) if(H8[S+vBase+vi*4]===GM_DRUMS[li]) on=true;
-      const cw=(CH-8-x0)/16;
+      const cw=(CH-4-x0)/16;
       ctx.globalAlpha=sel?1:0.35;
       ctx.fillStyle=on?DPAL[li%DPAL.length]:(sel?'#1d1d26':'#15151a');
       ctx.fillRect(x0+c*cw+1,y+1,cw-2,lh-2);
-      if(playing&&pos===s){ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillRect(x0+c*cw,y,cw,1);}  // playhead tick
+      if(playing&&pos===s){ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillRect(x0+c*cw,y,cw,1);}
     }
     ctx.globalAlpha=1;
   }
-  ctx.fillStyle='#8a8a99'; ctx.font='10px monospace';
-  ctx.fillText('BLK=drum WHT=toggle',18,233);
-  ctx.fillStyle='#4a4a54'; ctx.font='8px monospace'; ctx.fillText(BUILD,120,233);
+  // ---- rev.13c: single big card for drumSel (100px zone) ----
+  const py=115;
+  ctx.fillStyle='#101015'; ctx.fillRect(0,py,CH,101);
+  ctx.fillStyle='#3a3a44'; ctx.fillRect(0,py,CH,1);
+  const active=focusLayer==='edit';
+  ctx.fillStyle=active?'#2e2e3a':'#16161b'; ctx.fillRect(2,py+3,CH-4,94);
+  if(active){ctx.strokeStyle='#e6c84a';ctx.strokeRect(2.5,py+3.5,CH-5,93);}
+  const s=cursor, vBase=trkOff(selTrack)+TK.steps+s*ST.size;
+  let hit=-1;
+  for(let vi=0;vi<stepU8(selTrack,s,'nvoices');vi++) if(H8[S+vBase+vi*4]===GM_DRUMS[drumSel]) hit=vi;
+  const on=stepU8(selTrack,s,'on');
+  const col=DPAL[drumSel%DPAL.length];
+  ctx.fillStyle=col; ctx.font='14px monospace';
+  ctx.fillText(`${GM_SHORT[drumSel]} ${hit>=0?(on?'●':'○'):'─'}`,10,py+22);
+  if(hit>=0){
+    const vel=H8[S+vBase+hit*4+1], gate=H8[S+vBase+hit*4+2], prob=stepU8(selTrack,s,'prob');
+    ctx.fillStyle='#fff4d6'; ctx.font='11px monospace';
+    ctx.fillText(`V${vel}  G${gate===0xFF?'∞':(gate/4).toFixed(2)}  P${prob}%`,70,py+22);
+    const bx=10,bw=CH-20,by=py+32,bh=52;
+    ctx.fillStyle=`hsl(0,0%,${18+(vel/127)*55}%)`; ctx.fillRect(bx,by,bw,bh);
+    const frac=gate===0xFF?1:Math.min(1,(gate/4)/8);
+    ctx.fillStyle=col;                                          // instrument color = identity
+    const desat=prob/100;
+    ctx.globalAlpha=0.35+0.65*desat;                            // desat proxy via alpha over grey bg
+    ctx.fillRect(bx,by,Math.max(2,bw*frac),bh);
+    ctx.globalAlpha=1;
+  } else {
+    ctx.fillStyle='#55555f'; ctx.font='10px monospace';
+    ctx.fillText('此鼓此步无音 — 白键 toggle 写入',10,py+55);
+  }
+  drawFooter(['K1 step','K2 len','K3 mute','K4 prob'], focusLayer==='edit');
+}
+
+/* ---------- rev.13 helpers: sorted voices + chord name (03 §4 rev.11) ---------- */
+function sortedVoices(t,s){                      // -> [{note,vel,gate,rest}] pitch-ascending
+  const vBase=trkOff(t)+TK.steps+s*ST.size+ST.voices;
+  const nv=stepU8(t,s,'nvoices'), out=[];
+  for(let vi=0;vi<nv;vi++) out.push({note:H8[S+vBase+vi*4],vel:H8[S+vBase+vi*4+1],gate:H8[S+vBase+vi*4+2]});
+  out.sort((a,b)=>a.note-b.note);
+  return out;
+}
+const NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];   // module-level (rev.14: helpers + panels share it)
+const SCALE_NAMES=['','m','m','m','m','','m','m','m','m','m','dim'];  // crude maj/min quality (v1)
+function chordName(t,s){                         // 'Cmaj7' style: root + quality by interval set
+  const vs=sortedVoices(t,s);
+  if(vs.length===0) return '';
+  if(vs.length===1){const n=vs[0].note; return NAMES[n%12]+(Math.floor(n/12)-1);}
+  const root=vs[0].note%12, set=new Set(vs.map(v=>v.note%12));
+  const iv=[...set].map(x=>(x-root+12)%12).sort((a,b)=>a-b).join(',');
+  let q='';                                      // common triads/7ths
+  if(iv==='0,4,7')q='maj'; else if(iv==='0,3,7')q='m';
+  else if(iv==='0,4,7,11')q='maj7'; else if(iv==='0,3,7,10')q='m7';
+  else if(iv==='0,3,6')q='dim'; else if(iv==='0,4,8')q='aug';
+  else if(iv==='0,5,7')q='sus4'; else if(iv==='0,2,7')q='sus2';
+  else q=null;
+  return q===null ? vs.map(v=>NAMES[v.note%12]).join(' ') : NAMES[root]+q;
 }
 
 /* ---------- step-entry is the DEFAULT state (02 §2.1 rev.5): key press writes the cursor step ---------- */
@@ -321,17 +400,32 @@ function liveNote(keyIdx,down){                  // panel key -> live preview no
 }
 function stepEntry(pressed,down,released){
   if(!down||(!Array.isArray(pressed)&&!Array.isArray(released))) return;
-  const t=selTrack;
-  for(const keyIdx of (pressed||[])){
-    liveNote(keyIdx,true);                        // hear it now
-    let note;
-    if(trkU8(t,'channel')===9) note=GM_DRUMS[KEY_BLACK_IDX.indexOf(keyIdx)>=0?KEY_BLACK_IDX.indexOf(keyIdx):0];
-    else note=53+keyIdx;
-    note=Math.max(0,Math.min(127,note+keyShift)); // rev.7: OCT± shifts the written pitch (F3–G5 constraint)
-    M._ds_voice_add_wasm(t,cursor,note,100,1);
+  const t=selTrack, isDrum=trkU8(t,'channel')===9;
+  if(pressed&&pressed.length){
+    // rev.11 OVERRIDE: one press defines the whole step content (<=4 = chord). Collect
+    // all keys in this down-mask, write once; rest step + key = rewrite & revive.
+    liveNote(pressed[0],true);
+    const notes=[];
+    for(const keyIdx of pressed){
+      let note;
+      if(isDrum){
+        const bi=KEY_BLACK_IDX.indexOf(keyIdx);
+        if(bi<0) continue;                        // white key = toggle path (drumKeyHandler), skip here
+        note=GM_DRUMS[bi];
+      } else note=53+keyIdx;
+      notes.push(Math.max(0,Math.min(127,note+keyShift)));    // rev.7: OCT± shifts write pitch
+    }
+    if(notes.length){
+      if(notes.length>4) return;                  // >4 keys = reject (LED flash v1.1)
+      for(let vi=stepU8(t,cursor,'nvoices')-1;vi>=0;vi--)      // clear step: override, not append
+        M._ds_voice_remove_wasm(t,cursor,H8[S+trkOff(t)+TK.steps+cursor*ST.size+ST.voices+vi*4]);
+      H8[S+stepOff(t,cursor)+ST.on]=1;            // revive rest steps on write
+      for(const n of notes) M._ds_voice_add_wasm(t,cursor,n,100,1);
+      editVoice=0;
+    }
   }
   for(const keyIdx of (released||[])) liveNote(keyIdx,false);   // key up -> note-off
-  if(pressed&&pressed.length) cursor=Math.min(63,cursor+1);  // rev.9: advance, dead-stop at 63 (no wrap, blind-safe)
+  if(pressed&&pressed.length) cursor=Math.min(63,cursor+1);  // rev.9: advance, dead-stop at 63
 }
 
 /* ---------- rev.5 cursor axis + OCT rest/tie (02 §2.1 rev.3-5) ----------
@@ -372,7 +466,7 @@ function restTieCycle(){                         // EDIT page GLO+K4: none→res
 const COND_NAMES=['—','每2圈','每3圈','每4圈','每5圈','每6圈','每7圈','仅首圈','末4圈','FILL','flam'];
 let editVoice=0;                                 // active voice 0..3 (SELECT knob cycles)
 let condZoom=0;                                  // >0 = cond zoom feedback timer (frames)
-function drawEdit(){
+function drawEdit(){  // DEPRECATED rev.12 — embedded panel replaced standalone page; kept for reference
   ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
   const t=selTrack, s=cursor;
   const vBase=trkOff(t)+TK.steps+s*ST.size+ST.voices;
@@ -380,7 +474,6 @@ function drawEdit(){
   ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,20);
   ctx.font='11px monospace';
   const v0n=(nv>0)?H8[S+vBase]:null;
-  const NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
   const isDrum=trkU8(t,'channel')===9;
   let nm='';
   if(v0n!==null&&v0n!==0xFF){
@@ -467,7 +560,7 @@ function frame(t){
   if(dt>0.25)dt=0.25;
   try{
     M._ds_tick_wasm(dt); readMidiOut();          // tick always: live note-offs must drain even when stopped
-    if(mode==='home')drawHome(); else if(mode==='edit')drawEdit(); else drawGrid();
+    if(mode==='home')drawHome(); else drawGrid();      // rev.12: edit = embedded panel
   }catch(e){ crashBeacon('frame: '+e.message); lastT=0; }  // log it; next rAF retries
   rafId=requestAnimationFrame(frame);
 }
@@ -483,11 +576,23 @@ function panelButton(ev){
     const name=bitName(bit);
     switch(name){
       case 'SEQ': mode='grid'; break;
-      case 'EDIT': mode=(mode==='edit')?'grid':'edit'; break;   // EDIT toggle (03 §3.1)
+      case 'EDIT':                                     // rev.12: focus layer, not page
+        if(mode==='grid'||mode==='edit'){ mode='grid'; focusLayer=(focusLayer==='edit')?'grid':'edit'; }
+        else mode='grid';
+        break;
       case 'ARP': mode='home'; break;               // v1: no Euclid page yet
       case 'GLO': gloHeld=true; break;               // modifier: rest of this down-mask = shifted
-      case 'OCT-': if(mode==='edit'){cursor=Math.max(0,cursor-1);} else octShift(-1); break;  // EDIT: cursor− dead-stop
-      case 'OCT+': if(mode==='edit'){cursor=Math.min(63,cursor+1);} else octShift(+1); break;
+      case 'OCT-':                                     // rev.11 OCT cluster: GLO+OCT- = back 1 (play/edit axis)
+        if(mode==='grid'){ if(gloHeld||focusLayer==='edit') cursor=Math.max(0,cursor-1); else octShift(-1); }
+        else octShift(-1);                              // HOME/PLAY: octave shift
+        break;
+      case 'OCT+':                                     // GLO+OCT+ = rest/tie/restore cycle (grid+edit layer)
+        if(mode==='grid'){
+          if(gloHeld) restTieCycle();
+          else if(focusLayer==='edit') cursor=Math.min(63,cursor+1);
+          else octShift(+1);
+        } else octShift(+1);
+        break;
       case 'REC': M._ds_toggle_step_wasm(selTrack,cursor); break;  // v1: REC=cursor toggle
       case 'HOME': mode = mode==='home'?'grid':'home'; page=0; break;
       case 'PLAY': break;                              // handled on release edge (toggle)
@@ -513,7 +618,8 @@ function clearHeldMirrors(){
 }
 function bitName(bit){ return Object.entries(DSPanel.B).find(([n,b])=>b===bit)?.[0]; }
 function panelEnc(role,n){
-  if(mode==='edit'){                                        // ---- EDIT page (03 §3 rev.6) ----
+  const editFocus=(focusLayer==='edit'&&mode==='grid');     // rev.12: EDIT layer focus
+  if(editFocus){                                            // ---- EDIT layer (03 §4) ----
     const t=selTrack, s=cursor;
     const vBase=trkOff(t)+TK.steps+s*ST.size+ST.voices;
     const nv=stepU8(t,s,'nvoices');
@@ -558,12 +664,11 @@ function panelEnc(role,n){
   if(role===1){ M._ds_set_bpm_wasm(Math.max(40,Math.min(240,f64(OFF.bpm)+n))); return; } // ALGORITHM: BPM (v1)
   if(role===2){ return; }                                                     // PRESETS: unsignaled
   const t=selTrack;
-  if(role===3){                                              // K1: HOME=START / GRID=cursor axis (rev.5)
-    if(mode==='grid'){ cursorMove(n); return; }
+  if(role===3){                                              // K1: GRID=cursor axis; GLO+=START (rev.11)
+    if(mode==='grid'){ if(gloHeld){ M._ds_set_loop_wasm(t,Math.max(0,Math.min(63,trkU8(t,'loop_start')+n)),-1); } else cursorMove(n); return; }
     M._ds_set_loop_wasm(t,Math.max(0,Math.min(63,trkU8(t,'loop_start')+n)),-1); return;
   }
-  if(role===4){                                              // K2: HOME/SEQ=LEN (GLO held = ×16 cursor too)
-    if(mode==='grid'&&gloHeld){ cursorMove(n); return; }
+  if(role===4){                                              // K2: LEN (rev.11: GLO+K2 x16 retired)
     M._ds_set_loop_wasm(t,-1,Math.max(1,Math.min(64,trkU8(t,'loop_len')+n))); return;
   }
   if(role===5) M._ds_mute_wasm(t, n>0?1:0);                                   // K3 MUTE: right=on, left=off
