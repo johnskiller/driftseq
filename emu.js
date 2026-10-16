@@ -792,13 +792,14 @@ function panelEnc(role,n){
       if(role===6){                                        // K4 LINK
         if(n>0){
           M._ds_euclid_wasm(t,1,k||4,nn||16,rot);          // right: link + fill (defaults 4/16)
-          // seed default voices into empty on-steps (03 §4.2: drum=选鼓, melodic=C3 #13);
+          // seed default voices into empty on-steps (03 §4.2: drum=选鼓); melodic does NOT
+          // seed (#13 resolved: chord track fill = gate-only, no C3 orphans) — John 10-16;
           // idempotent — re-link only fills steps the user hasn't touched (nvoices==0)
-          const isDrum=trkU8(t,'channel')===9;
-          for(let st=0;st<64;st++){
-            if(stepU8(t,st,'on') && stepU8(t,st,'nvoices')===0){
-              if(isDrum) M._ds_voice_add_wasm(t,st,GM_DRUMS[drumSel],100,1);
-              else       M._ds_voice_add_wasm(t,st,48,100,4);   // C3 — #13 open
+          if(trkU8(t,'channel')===9){
+            for(let st=0;st<64;st++){
+              if(stepU8(t,st,'on') && stepU8(t,st,'nvoices')===0){
+                M._ds_voice_add_wasm(t,st,GM_DRUMS[drumSel],100,1);
+              }
             }
           }
         }
