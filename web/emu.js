@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r15 10-16';
+const BUILD='r15b 10-16';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -219,6 +219,12 @@ function drawGrid(){
     ctx.fillRect(x+1,y+1,cw-2,chh-2);
     const vs=sortedVoices(selTrack,s);                          // pitch-ascending, high on top
     const on=stepU8(selTrack,s,'on');
+    if(on && vs.length===0){                                    // bare gate: en=1, no voices
+      ctx.globalAlpha=0.4;                                      // (#16: dimmed gate bar)
+      ctx.fillStyle=DPAL[(trkU8(selTrack,'channel')*3)%DPAL.length];
+      ctx.fillRect(x+2,y+chh-4,cw-4,3);                         // bottom bar = "will fire, no note"
+      ctx.globalAlpha=1;
+    }
     for(let li=0;li<vs.length;li++){
       const v=vs[li], lineY=y+chh-4-li*5;                       // slot i: bottom-up (high pitch top)
       if(!on){                                                  // rest: hollow/dashed line
@@ -310,12 +316,20 @@ function drawDrumGrid(){
     for(let c=0;c<16;c++){
       const s=page*16+c;
       const vBase=trkOff(selTrack)+TK.steps+s*ST.size;
-      let on=false;
-      for(let vi=0;vi<stepU8(selTrack,s,'nvoices');vi++) if(H8[S+vBase+vi*4]===GM_DRUMS[li]) on=true;
+      let on=false, anyVoice=false;
+      for(let vi=0;vi<stepU8(selTrack,s,'nvoices');vi++){
+        if(H8[S+vBase+vi*4]===GM_DRUMS[li]){ on=true; anyVoice=true; }
+      }
+      const sOn=stepU8(selTrack,s,'on');                        // step gate (vs lane voice)
       const cw=(CH-4-x0)/16;
       ctx.globalAlpha=sel?1:0.35;
       ctx.fillStyle=on?DPAL[li%DPAL.length]:(sel?'#1d1d26':'#15151a');
       ctx.fillRect(x0+c*cw+1,y+1,cw-2,lh-2);
+      if(sOn && !anyVoice){                                     // bare gate tick (#16)
+        ctx.globalAlpha=sel?0.55:0.3; ctx.fillStyle=DPAL[li%DPAL.length];
+        ctx.fillRect(x0+c*cw+1,y+lh-3,cw-2,1);                  // AFTER cell bg (was painted over)
+        ctx.globalAlpha=sel?1:0.35;
+      }
       if(playing&&pos===s){ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillRect(x0+c*cw,y,cw,1);}
     }
     ctx.globalAlpha=1;
