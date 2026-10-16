@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r14b 10-16';
+const BUILD='r14c 10-16';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -225,8 +225,7 @@ function drawEditPanel(y0){                       // y0=96 (melodic, 4 compact c
   const cardH=25;
   for(let vi=0;vi<4;vi++){
     const y=y0+16+vi*cardH, active=(focusLayer==='edit')&&vi===editVoice;
-    ctx.fillStyle=active?'#2e2e3a':'#16161b';
-    ctx.fillRect(2,y+1,CH-4,cardH-2);
+    if(vi>=nv){ ctx.fillStyle='#16161b'; ctx.fillRect(2,y+1,CH-4,cardH-2); }  // empty slot: plain dark
     if(active){ctx.strokeStyle='#e6c84a';ctx.strokeRect(2.5,y+1.5,CH-5,cardH-3);}
     if(vi>=nv){
       ctx.fillStyle='#55555f'; ctx.font='10px monospace';
@@ -238,17 +237,19 @@ function drawEditPanel(y0){                       // y0=96 (melodic, 4 compact c
     const nm2=`${NAMES[v.note%12]}${Math.floor(v.note/12)-1}`;
     const g2=v.gate===0xFF?'∞':(v.gate/4).toFixed(2);
     const prob=stepU8(t,s,'prob');
-    ctx.fillStyle=active?'#fff4d6':'#b9b9c4'; ctx.font='9px monospace';
-    ctx.fillText(`v${vi+1}${sym} ${nm2} g${g2} v${v.vel} p${prob}`,6,y+16);   // exact numbers (rev.14b)
-    // ---- param bar underneath the text: bg lum = vel, len = gate, hue desat = prob ----
-    const bx=6, bw=CH-bx-12, by=y+18, bh=4;
-    ctx.fillStyle=`hsl(0,0%,${18+(v.vel/127)*55}%)`;             // bg luminance = velocity
-    ctx.fillRect(bx,by,bw,bh);
-    const frac=(v.gate===0xFF)?1:Math.min(1,(v.gate/4)/8);       // gate 8.00 = full
     const hue=v.note%12*30, desat=prob/100;                      // prob: 1=pure hue, 0=grey
-    ctx.fillStyle=`hsl(${hue},${Math.round(72*desat)}%,55%)`;
-    ctx.fillRect(bx,by,Math.max(2,bw*frac),bh);                  // bar length = gate
-    if(v.gate===0xFF&&playing){ctx.fillStyle='#fff';ctx.fillRect(bx+bw-3,by,3,bh);}
+    const frac=(v.gate===0xFF)?1:Math.min(1,(v.gate/4)/8);       // gate 8.00 = full
+    // rev.14c: the WHOLE row background is the param bar (John: strip under text too fiddly)
+    ctx.fillStyle=`hsl(0,0%,${18+(v.vel/127)*55}%)`;             // bg luminance = velocity
+    ctx.fillRect(3,y+1,CH-6,cardH-2);
+    ctx.fillStyle=`hsl(${hue},${Math.round(72*desat)}%,52%)`;
+    ctx.fillRect(3,y+1,Math.max(3,(CH-6)*frac),cardH-2);         // bar length = gate
+    if(v.gate===0xFF&&playing){ctx.fillStyle='#fff';ctx.fillRect(CH-6,y+1,3,cardH-2);}
+    // text on top, 11px, dark 1px shadow keeps it readable on bright or dark bars
+    ctx.font='11px monospace';
+    const txt=`v${vi+1}${sym} ${nm2} g${g2} v${v.vel} p${prob}`;
+    ctx.fillStyle='rgba(0,0,0,.85)'; ctx.fillText(txt,7,y+17);
+    ctx.fillStyle=active?'#fff4d6':'#f0f0f6'; ctx.fillText(txt,7,y+16);
   }
 }
 const FOOT_GRID=['K1 step','K2 len','K3 mute','K4 prob'];
