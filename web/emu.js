@@ -3,6 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
+const BUILD='r8 10-16';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -167,6 +168,8 @@ function drawHome(){
   ctx.fillStyle='#181820'; ctx.fillRect(0,220,CH,20);
   ctx.fillStyle='#8a8a99'; ctx.font='10px monospace';
   ctx.fillText('K1 START   K2 LEN   K3 MUTE   K4 PROB',6,233);
+  ctx.fillStyle='#4a4a54'; ctx.font='8px monospace';
+  ctx.fillText(BUILD,180,233);                   // build stamp every page (John: verify freshness at a glance)
 }
 
 /* ---------- the screen: SEQ grid (03-screens) ---------- */
@@ -229,8 +232,9 @@ function drawGrid(){
     ctx.globalAlpha=1;
     if(c===0){ctx.fillStyle='#8a8a99';ctx.fillText(`P${r+1}`,3,y+11);}   // row = page label
   }
-  ctx.fillStyle='#8a8a99'; ctx.font='10px monospace';
-  ctx.fillText('K1 step  K2 len  K3 mute  K4 prob',18,233);   // rev.8: matches panelEnc roles (was stale PLAY labels)
+  ctx.fillStyle='#8a8a99'; ctx.font='8px monospace';
+  ctx.fillText('K1 step K2 len K3 mute K4 prob',18,233);   // rev.8: matches panelEnc roles (was stale PLAY labels)
+  ctx.fillStyle='#4a4a54'; ctx.fillText(BUILD,164,233);
 }
 
 /* ---------- the screen: drum lanes (03 §2.3 — ALL drums visible, selected lane lit) ---------- */
@@ -262,7 +266,8 @@ function drawDrumGrid(){
     ctx.globalAlpha=1;
   }
   ctx.fillStyle='#8a8a99'; ctx.font='10px monospace';
-  ctx.fillText('BLK=drum WHT=toggle · K1-K4 track',18,233);
+  ctx.fillText('BLK=drum WHT=toggle',18,233);
+  ctx.fillStyle='#4a4a54'; ctx.font='8px monospace'; ctx.fillText(BUILD,120,233);
 }
 
 /* ---------- step-entry is the DEFAULT state (02 §2.1 rev.5): key press writes the cursor step ---------- */
@@ -422,7 +427,8 @@ function drawEdit(){
     ctx.fillText(`VEL ${nv?H8[S+vBase+av*4+1]:'—'}`,128,226);
     ctx.fillText(`PRB ${stepU8(t,s,'prob')}%`,186,226);
     ctx.fillStyle='#6a6a76';
-    ctx.fillText('K1 pit K2 gate K3 vel K4 prob SEL=v',10,237);
+    ctx.fillText('K1 pit K2 gat K3 vel K4 prob SEL=v',10,237);
+    ctx.fillStyle='#4a4a54'; ctx.font='8px monospace'; ctx.fillText(BUILD,192,237);
   }
   if(condZoom>0) condZoom--;
 }
