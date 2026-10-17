@@ -175,12 +175,34 @@ int main(void)
     /* 10. melodic key = live audition through the engine (ds_live_on) */
     ui_button(B_HOME, 1, 1);
     CHECK(ui_mode == M_HOME, "back to HOME for live keys");
+    sel_track = 3;                          /* melodic track: keys = 53+key (r16j liveNote) */
+    key_shift = 0;
     { int n0 = (int)g.live_n;
       panel_key_handler(0, 1);             /* key 0 = F3 = note 53 */
       CHECK((int)g.live_n == n0 + 1, "melodic key starts live note");
       CHECK(g.live[g.live_n - 1].note == 53 + key_shift, "live note = 53+key+shift");
       panel_key_up(0);
       CHECK((int)g.live_n == n0, "key up removes live note"); }
+    { int n0 = (int)g.live_n;              /* drum track HOME keys = GM map (r16j) */
+      sel_track = 0;
+      panel_key_handler(0, 1);
+      CHECK(g.live[g.live_n - 1].note == 36, "drum track live key = GM kick");
+      panel_key_up(0);
+      CHECK((int)g.live_n == n0, "drum live key up removes note"); }
+
+    /* 10b. melodic GRID step entry: white key writes the cursor step,
+     * revives it, advances cursor (dead-stop), and auditions */
+    ui_button(B_SEQ, 1, 1);
+    sel_track = 3;                          /* melodic demo track (bass) */
+    cursor = 20;                            /* an empty step: override = pure write */
+    panel_key_handler(2, 1);                /* key 2 = note 55 (G3) */
+    CHECK(TRK()->steps[20].nvoices == 1 && TRK()->steps[20].v[0].note == 55,
+          "melodic white key writes cursor step (override)");
+    CHECK(TRK()->steps[20].on == 1, "step entry revives gate");
+    CHECK(cursor == 21, "step entry advances cursor");
+    panel_key_up(2);                        /* release auditions off, writes nothing */
+    CHECK(TRK()->steps[20].v[0].note == 55, "key release keeps the written note");
+    sel_track = 0;
 
     /* 11. draw calls smoke (no crash, all four screens) */
     ui_mode = M_HOME; ui_draw();

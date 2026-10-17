@@ -103,49 +103,85 @@ static uint8_t key_white_index(uint8_t key)        /* 0..15 = step-in-page */
     return ord;
 }
 
-/* black-key ordinal -> drum lane; white key -> toggle step (drum track).
- * Non-grid keys = live preview through the engine (emu liveNote parity). */
+/* black-key ordinal -> drum lane; white key -> step-in-page.
+ * r16j key dispatch (mode/focus aware):
+ *   grid+drum  : black = pick drum + audition, white = toggle that drum
+ *   grid+melodic: OVERRIDE step entry — write key as the step content,
+ *                revive rest, cursor+1 (dead-stop), live audition
+ *   non-grid   : keys = live audition only
+ * EDIT layer: keys edit voices (batch 3) — no grid writes now. */
 static void panel_key_handler(uint8_t key, uint8_t down)
 {
-    if (!down)
+    if (ui_mode != M_GRID || focus_layer) {
+        /* live audition everywhere else (melodic math; drums map GM) */
+        int note;
+        if (is_drum_trk()) {
+            uint8_t bi = key_black_ordinal(key);
+            note = (bi != 0xFF) ? GM_DRUMS[bi] : 36;    /* white on drum = kick */
+        } else {
+            note = 53 + (int)key + key_shift;
+            if (note < 0) note = 0;
+            if (note > 127) note = 127;
+        }
+        if (down) ds_live_on(&g, sel_track, (uint8_t)note, 100);
+        else ds_live_off(&g, sel_track, (uint8_t)note);
         return;
-    if (ui_mode == M_GRID && is_drum_trk()) {
-        uint8_t bi = key_black_ordinal(key);
-        if (bi != 0xFF) { drum_sel = bi; return; }
-        {   /* white key = toggle step: add/remove sel drum on that step */
-            uint8_t wi = key_white_index(key), page = cursor >> 4;
-            if (wi < 16u) {
-                uint8_t s = page * 16 + wi;
-                ds_track *tr = TRK();
-                uint8_t vi, found = 0;
-                for (vi = 0; vi < tr->steps[s].nvoices; vi++)
-                    if (tr->steps[s].v[vi].note == GM_DRUMS[drum_sel]) found = 1;
-                if (found)
-                    ds_voice_remove(tr, s, GM_DRUMS[drum_sel]);
-                else
-                    ds_voice_add(tr, s, GM_DRUMS[drum_sel], 100, 1);
-                cursor = s;
+    }
+    if (is_drum_trk()) {                          /* r16j drumKeyHandler: press edge only */
+        if (!down)
+            return;                               /* key-up = no toggle (r16j parity) */
+        {
+            uint8_t bi = key_black_ordinal(key);
+            if (bi != 0xFF) {
+                drum_sel = bi;                    /* pick instrument */
+                ds_live_on(&g, sel_track, GM_DRUMS[bi], 100);   /* hear it */
+                return;
+            }
+            {   /* white key = toggle sel drum on that step (page follows cursor) */
+                uint8_t wi = key_white_index(key), page = cursor >> 4;
+                if (wi < 16u) {
+                    uint8_t s = (uint8_t)(page * 16 + wi);
+                    ds_track *tr = TRK();
+                    uint8_t vi, found = 0;
+                    for (vi = 0; vi < tr->steps[s].nvoices; vi++)
+                        if (tr->steps[s].v[vi].note == GM_DRUMS[drum_sel]) found = 1;
+                    if (found)
+                        ds_voice_remove(tr, s, GM_DRUMS[drum_sel]);
+                    else {
+                        ds_voice_add(tr, s, GM_DRUMS[drum_sel], 100, 1);
+                        tr->steps[s].on = 1;      /* bare write revives the gate */
+                    }
+                    ds_live_on(&g, sel_track, GM_DRUMS[drum_sel], 100);  /* audition (r16j) */
+                }
             }
         }
         return;
     }
-    {   /* melodic live audition: note = 53 + key + key_shift (F3 base, rev.7) */
+    {   /* r16j stepEntry (rev.11 override, edge-model v1): one key = one
+         * write — clear step, add voice, revive, cursor+1 dead-stop */
+        ds_track *tr = TRK();
+        uint8_t s = cursor;
         int note = 53 + (int)key + key_shift;
         if (note < 0) note = 0;
         if (note > 127) note = 127;
-        if (down) ds_live_on(&g, (uint8_t)sel_track, (uint8_t)note, 100);
+        if (down) {
+            while (tr->steps[s].nvoices)          /* override, not append */
+                ds_voice_remove(tr, s, tr->steps[s].v[0].note);
+            ds_voice_add(tr, s, (uint8_t)note, 100, 1);
+            tr->steps[s].on = 1;                  /* revive rest steps on write */
+            edit_voice = 0;
+            if (cursor < 63u) cursor++;           /* rev.9: advance, dead-stop */
+        }
+        /* audition follows the key down/up either way */
+        if (down) ds_live_on(&g, sel_track, (uint8_t)note, 100);
+        else ds_live_off(&g, sel_track, (uint8_t)note);
     }
-    /* melodic key entry (override semantics, rev.11): batch-2 polish lands
-     * the chord/hold-step-picker paths; v1 batch 1 = single note write. */
 }
 
 /* key release -> note-off for the live preview (same pitch math as down) */
 static void panel_key_up(uint8_t key)
 {
-    int note = 53 + (int)key + key_shift;
-    if (note < 0) note = 0;
-    if (note > 127) note = 127;
-    ds_live_off(&g, (uint8_t)sel_track, (uint8_t)note);
+    panel_key_handler(key, 0);
 }
 
 static void ui_poll(void)

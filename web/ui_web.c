@@ -117,7 +117,14 @@ void ds_web_btn(uint8_t btn, int down)             /* down=1 press, 0 release */
     ui_button(btn, (uint8_t)(down != 0), (uint8_t)(down == 0));
 }
 EMSCRIPTEN_KEEPALIVE
-void ds_web_enc(uint8_t enc, int8_t det) { ui_encoder(enc, det); }
+void ds_web_enc(uint8_t enc, int8_t det)
+{
+    int n = det;                                     /* split into per-detent events:
+        the handlers are written for ±1 (fw front-end splits too); SELECT moves
+        one track per detent, K1 cursor one step per detent, etc. */
+    while (n > 0) { ui_encoder(enc, 1); n--; }
+    while (n < 0) { ui_encoder(enc, -1); n++; }
+}
 EMSCRIPTEN_KEEPALIVE
 void ds_web_key(uint8_t key, int down)
 {

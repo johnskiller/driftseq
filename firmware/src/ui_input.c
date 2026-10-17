@@ -8,6 +8,7 @@
  * panel_key_handler takes key ids 0..26 = notes 53..79 (F3..G5). */
 
 /* firmware front-end (fm1_in statics; compiled only in the unity root) */
+static uint32_t panel_held;                      /* key ids we've seen down (release-edge derive) */
 #ifndef DS_WEB_UI
 static void ui_input_poll(void)
 {
@@ -35,8 +36,15 @@ static void ui_input_poll(void)
     }
     np = fm1_input_note_edges();
     for (i = 14u; i < FM1_NKEY; i++) {
+        uint8_t held = (uint8_t)((fm1_in.notes >> (i - 14u)) & 1u);   /* debounced mask */
         if (np & (1u << (i - 14u)))
             panel_key_handler(i - 14u, 1);
+        else if (!held && panel_held & (1u << (i - 14u)))
+            panel_key_up(i - 14u);                /* release edge: was held, now isn't */
+        if (np & (1u << (i - 14u)))
+            panel_held |= 1u << (i - 14u);
+        else if (!(fm1_in.notes & (1u << (i - 14u))))
+            panel_held &= ~(1u << (i - 14u));
     }
 }
 #endif /* DS_WEB_UI */
