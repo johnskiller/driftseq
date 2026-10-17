@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r16c 10-17';
+const BUILD='r16d 10-17';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -334,13 +334,13 @@ function drawDrumGrid(){
         if(H8[S+vBase+vi*4]===GM_DRUMS[li]){ on=true; anyVoice=true; }
       }
       const sOn=stepU8(selTrack,s,'on');                        // step gate (vs lane voice)
-      const cw=(CH-4-x0)/16;
+      const cw=(CH-x0)/16;
       ctx.globalAlpha=sel?1:0.35;
       ctx.fillStyle=on?DPAL[li%DPAL.length]:(sel?'#1d1d26':'#15151a');
-      ctx.fillRect(x0+c*cw+1,y+1,cw-2,lh-2);
+      ctx.fillRect(x0+c*cw|0,y,cw+1,lh);                        // full-bleed cells: no black seams
       if(sOn && !anyVoice){                                     // bare gate tick (#16)
         ctx.globalAlpha=sel?0.55:0.3; ctx.fillStyle=DPAL[li%DPAL.length];
-        ctx.fillRect(x0+c*cw+1,y+lh-3,cw-2,1);                  // AFTER cell bg (was painted over)
+        ctx.fillRect(x0+c*cw|0,y+lh-2,cw,1);                    // AFTER cell bg (was painted over)
         ctx.globalAlpha=sel?1:0.35;
       }
       if(playing&&pos===s){ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillRect(x0+c*cw,y,cw,1);}
