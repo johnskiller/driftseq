@@ -347,7 +347,10 @@ static void ui_arp_encoder(uint8_t enc, int8_t det)
  * EN_ALGO=1, EN_PRESET=2, EN_K1..K4=3..6. */
 static void ui_encoder(uint8_t enc, int8_t det)
 {
-    if (enc == EN_SELECT) {                      /* SELECT: track, no wrap */
+    /* r16j panelEnc: SELECT is context-aware, not global —
+     * ARP page + non-EDIT = track; EDIT layer (melodic) = active voice.
+     * (drum EDIT resolves its voice by drum_sel, never via SELECT) */
+    if (enc == EN_SELECT && !(ui_mode == M_GRID && focus_layer && !is_drum_trk())) {
         int next = sel_track + (det > 0 ? 1 : -1);
         if (next < 0) next = 0;
         if (next > 15) next = 15;

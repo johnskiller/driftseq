@@ -59,6 +59,12 @@ static midi_transport_fn midi_transport_send;
 static void midi_transport_usb3(uint8_t st, uint8_t d1, uint8_t d2){ (void)st;(void)d1;(void)d2; }
 static int plat_midi_in(uint32_t *pkt){ (void)pkt; return 0; }
 
+/* chord_name sanity (exercises the r16j rev.13 port): single = "C3", C-E-G
+ * over C = "Cmaj", spell-out for unknown sets. The body runs AFTER the unity
+ * includes (g/chord_name live below) — this is just the prototype. */
+static void chord_name_test(void);
+static int chord_name_result;
+
 /* engine state: the app expects the symbol g (host/driftseq.c defines
  * ds_state as struct; wasm shim uses a pointer — host code takes &g) */
 #include "driftseq.c"
@@ -73,6 +79,28 @@ ds_state g;
 #include "../firmware/src/ui_input.c"
 #include "../firmware/src/ui_screens.c"
 #include "../firmware/src/ui_edit.c"
+
+/* chord_name test body — g and chord_name are both visible here */
+static void chord_name_test(void)
+{
+    ds_track *tr = &g.pat.track[3];
+    char *cn;
+    while (tr->steps[20].nvoices) ds_voice_remove(tr, 20, tr->steps[20].v[0].note);
+    ds_voice_add(tr, 20, 48, 100, 4);            /* C3 */
+    cn = chord_name(3, 20);
+    if (strcmp(cn, "C3")) { chord_name_result = 0; return; }
+    ds_voice_add(tr, 20, 52, 100, 4);            /* E3 -> 0,4 */
+    ds_voice_add(tr, 20, 55, 100, 4);            /* G3 -> 0,4,7 */
+    cn = chord_name(3, 20);
+    if (strcmp(cn, "Cmaj")) { chord_name_result = 0; return; }
+    ds_voice_add(tr, 20, 58, 100, 4);            /* A#3 -> unknown set */
+    cn = chord_name(3, 20);
+    if (strcmp(cn, "C E G A#")) { chord_name_result = 0; return; }
+    ds_voice_remove(tr, 20, 52);
+    ds_voice_remove(tr, 20, 58);
+    cn = chord_name(3, 20);
+    chord_name_result = !strcmp(cn, "C G");      /* power dyad spells out */
+}
 
 
 /* ---- extended asserts ---- */
@@ -211,6 +239,8 @@ int main(void)
     CHECK(cursor == 20, "EDIT keys never advance cursor");
     panel_key_handler(4, 1);                /* same note again = delete */
     CHECK(TRK()->steps[20].nvoices == 1, "EDIT same-note deletes the voice");
+    chord_name_test();
+    CHECK(chord_name_result, "chord name single note + quality");
     focus_layer = 0;
     sel_track = 0;
 

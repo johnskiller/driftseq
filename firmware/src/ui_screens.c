@@ -71,6 +71,65 @@ static char *gate_str(uint8_t gate)
     return b;
 }
 
+/* chord name (r16j rev.13 verbatim): single note = "C3"; interval-set match
+ * against common triads/7ths = "Cmaj7" style; else pitch classes spaced out.
+ * Returns a txt_next() buffer ("" = empty step). */
+static char *chord_name(uint8_t t, uint8_t s)
+{
+    char *b = txt_next();
+    uint8_t i, j, root, ivs[4], niv = 0;
+    uint16_t set_mask;                              /* 12 bits — uint8_t would eat bit8+ (Db..) */
+    voices_sorted(t, s);
+    b[0] = 0;
+    if (sort_n == 0)
+        return b;
+    if (sort_n == 1) {
+        strcpy_(b, note_name2(sort_vs[0][0]));
+        return b;
+    }
+    root = (uint8_t)(sort_vs[0][0] % 12u);
+    set_mask = 0;
+    for (i = 0; i < sort_n; i++)
+        set_mask = (uint16_t)(set_mask | (1u << (sort_vs[i][0] % 12u)));
+    for (i = 0; i < 12; i++) {                      /* sorted interval list (dedup via mask) */
+        if (set_mask & (1u << i)) {
+            uint8_t iv = (uint8_t)((i - root + 12u) % 12u);
+            for (j = 0; j < niv && ivs[j] < iv; j++)
+                ;
+            if (j == niv || ivs[j] != iv) {
+                int k;
+                for (k = niv; k > j; k--)
+                    ivs[k] = ivs[k - 1];
+                ivs[j] = iv;
+                niv++;
+            }
+        }
+    }
+    {   /* match "0,4,7"=maj "0,3,7"=m "0,4,7,11"=maj7 "0,3,7,10"=m7
+         * "0,3,6"=dim "0,4,8"=aug "0,5,7"=sus4 "0,2,7"=sus2; else spell out */
+        const char *q = NULL;
+        if (niv == 3 && ivs[0] == 0 && ivs[1] == 4 && ivs[2] == 7) q = "maj";
+        else if (niv == 3 && ivs[0] == 0 && ivs[1] == 3 && ivs[2] == 7) q = "m";
+        else if (niv == 4 && ivs[0] == 0 && ivs[1] == 4 && ivs[2] == 7 && ivs[3] == 11) q = "maj7";
+        else if (niv == 4 && ivs[0] == 0 && ivs[1] == 3 && ivs[2] == 7 && ivs[3] == 10) q = "m7";
+        else if (niv == 3 && ivs[0] == 0 && ivs[1] == 3 && ivs[2] == 6) q = "dim";
+        else if (niv == 3 && ivs[0] == 0 && ivs[1] == 4 && ivs[2] == 8) q = "aug";
+        else if (niv == 3 && ivs[0] == 0 && ivs[1] == 5 && ivs[2] == 7) q = "sus4";
+        else if (niv == 3 && ivs[0] == 0 && ivs[1] == 2 && ivs[2] == 7) q = "sus2";
+        if (q) {
+            strcpy_(b, note_name(root));             /* r16j: NAMES[root], NO octave */
+            strcpy_(txt_end(b), q);
+        } else {
+            for (i = 0; i < sort_n; i++) {
+                strcpy_(txt_end(b), note_name(sort_vs[i][0]));
+                if (i + 1 < sort_n)
+                    strcpy_(txt_end(b), " ");
+            }
+        }
+    }
+    return b;
+}
+
 /* ---- footer (prefix-free, fixed columns, 10px) ---- */
 static void ui_draw_footer(void)
 {
@@ -224,7 +283,11 @@ static void draw_grid_melodic(void)
     cv_begin(240, 224, C_BLACK);
     cv_rect(0, 0, 240, 16, TB_BG);
     cv_text(6, 2, &FONT_T, txt_join("SEQ TRK", txt_num(0, sel_track + 1)), TB_TX);
-    cv_text(150, 2, &FONT_T, txt_st(cursor + 1), tr->mute ? MUTE_GRAY : GREEN_OK);
+    {   /* r16j: `st${cursor+1}${cn?' '+cn:''}` — chord quality on the right */
+        char *cn = chord_name(sel_track, cursor);
+        cv_text(150, 2, &FONT_T, txt_join2(txt_st(cursor + 1), *cn ? txt_join("", cn) : (char *)0),
+                tr->mute ? MUTE_GRAY : GREEN_OK);
+    }
     if (key_shift != 0)
         cv_text(120, 2, &FONT_T, key_shift > 0 ? "+" : "-", YELLOW);
     if (focus_layer)

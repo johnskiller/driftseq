@@ -38,6 +38,14 @@ static char *txt_st(uint8_t one_based)
     return txt_trk("ST", one_based);
 }
 
+/* txt_join with an optional tail — NULL tail returns just a */
+static char *txt_join2(const char *a, const char *b)
+{
+    if (!b)
+        return txt_join(a, "");
+    return txt_join(a, b);
+}
+
 /* "KCK st17" — join with a space */
 static char *txt_join(const char *a, const char *b)
 {
