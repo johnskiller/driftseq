@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r16d 10-17';
+const BUILD='r16f 10-17';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -50,9 +50,12 @@ function monEvent(bytes){
   mon.innerHTML=`<span class="t">${stamp}</span> ${txt}`;
 }
 
-/* GM drum kit notes the emu's live keybed can write (see liveNote) + common extras.
+/* GM drum kit notes the FM-1 keybed can write: 11 black keys = 11 selectable drums
+ * (John: "FM1只有11个黑键，无法选择GM对应的全部20个鼓" — lane list = hardware truth).
+ * Wider-GM extras (56/37/54/40/58/62/63/27/34) still PLAY on ch10 (engine is
+ * note-agnostic, GM files round-trip) but have no lane in v1; kit page = v1.1.
  * DPAL color = instrument identity: same note always same color everywhere. */
-const GM_DRUMS=[36,38,42,46,49,45,41,43,51,47,39,56,37,54,40,58,62,63,27,34];
+const GM_DRUMS=[36,38,42,46,49,45,41,43,51,47,39];
 const DPAL=['#e05c5c','#e08b3c','#d9c94a','#7fd94a','#4ad9a8','#4ac5d9','#5c7fe0','#9a5ce0','#e05ca8','#e05c7f','#c9d96b','#8a6bd9'];
 
 const COLORS=[
@@ -300,13 +303,14 @@ function drawEditPanel(y0){                       // y0=96 (melodic, 4 compact c
 }
 const FOOT_GRID=['STEP','LEN','MUTE','PROB'];
 const FOOT_EDIT=['PIT','GAT','VEL','PROB','SEL'];
+const FOOT_DRUM=['VEL','GAT','PROB',''];           // r16e: drum EDIT = K1 VEL K2 GAT K3 PROB, K4 spare
 const FOOT_X=[8,72,132,188];                       // fixed columns under K1..K4 (no 'K1' prefix)
-function drawFooter(editFocus){
+function drawFooter(editFocus,isDrum){
   ctx.fillStyle='#181820'; ctx.fillRect(0,216,CH,24);
   ctx.font='10px monospace';                        // bigger: K labels are implicit (fixed row)
-  const labels=editFocus?FOOT_EDIT:FOOT_GRID, col=editFocus?'#e6c84a':'#8a8a99';
-  for(let i=0;i<4;i++){ ctx.fillStyle=col; ctx.fillText(labels[i],FOOT_X[i],233); }
-  if(editFocus){ ctx.fillStyle='#e6c84a'; ctx.fillText(labels[4],FOOT_X[3]+40,233); } // SEL after PROB
+  const labels=editFocus?(isDrum?FOOT_DRUM:FOOT_EDIT):FOOT_GRID, col=editFocus?'#e6c84a':'#8a8a99';
+  for(let i=0;i<4;i++){ if(!labels[i]) continue; ctx.fillStyle=col; ctx.fillText(labels[i],FOOT_X[i],233); }
+  if(editFocus&&!isDrum){ ctx.fillStyle='#e6c84a'; ctx.fillText(labels[4],FOOT_X[3]+40,233); } // SEL: melodic only
   ctx.fillStyle='#4a4a54'; ctx.font='8px monospace'; ctx.fillText(BUILD,164,238);
 }
 
@@ -319,7 +323,7 @@ function drawDrumGrid(){
   ctx.fillText(`DRUM TRK ${selTrack+1} · p${pg+1}/4`,6,12);
   ctx.fillStyle= trkU8(selTrack,'mute')?'#5a5a62':'#5fe08a';
   ctx.fillText(`st${cursor+1} ${GM_SHORT[drumSel]||('D'+drumSel)}`,150,12);
-  const nL=GM_DRUMS.length, lh=11, x0=30, y0=16;               // rev.13b: 9x11px lanes
+  const nL=GM_DRUMS.length, lh=13, x0=30, y0=16;               // 11 lanes x13 = 143px (r16e: lanes above card zone 160)
   const pos=i32(OFF.pos16+selTrack*4);
   ctx.font='8px monospace';
   for(let li=0;li<nL;li++){
@@ -335,49 +339,65 @@ function drawDrumGrid(){
       }
       const sOn=stepU8(selTrack,s,'on');                        // step gate (vs lane voice)
       const cw=(CH-x0)/16;
+      // r16f cell semantics (John): no note = HOLLOW square, note = SOLID —
+      // solid dark off-cells at 0.35 alpha read as smears/lines on 240px.
+      const isCur=s===cursor&&sel&&anyVoice;
+      const hitIdx=(()=>{let f=-1;for(let k2=0;k2<stepU8(selTrack,s,'nvoices');k2++)if(H8[S+vBase+k2*4]===GM_DRUMS[li])f=k2;return f;})();
+      const vel=hitIdx>=0?H8[S+vBase+hitIdx*4+1]:100;
+      const gRaw=hitIdx>=0?H8[S+vBase+hitIdx*4+2]:4;
+      const gFrac=gRaw===0xFF?1:Math.min(1,(gRaw/4)/8);
       ctx.globalAlpha=sel?1:0.35;
-      ctx.fillStyle=on?DPAL[li%DPAL.length]:(sel?'#1d1d26':'#15151a');
-      ctx.fillRect(x0+c*cw|0,y,cw+1,lh);                        // full-bleed cells: no black seams
-      if(sOn && !anyVoice){                                     // bare gate tick (#16)
-        ctx.globalAlpha=sel?0.55:0.3; ctx.fillStyle=DPAL[li%DPAL.length];
-        ctx.fillRect(x0+c*cw|0,y+lh-2,cw,1);                    // AFTER cell bg (was painted over)
-        ctx.globalAlpha=sel?1:0.35;
+      if(on){                                                   // solid hit
+        ctx.fillStyle=DPAL[li%DPAL.length];
+        ctx.fillRect(x0+c*cw|0,y,cw+1,lh);
+        if(isCur&&gFrac<1){                                     // gate: bright span vs dim remainder
+          ctx.globalAlpha=0.3; ctx.fillStyle='#000';
+          ctx.fillRect((x0+c*cw|0)+Math.max(2,(cw)*gFrac),y,cw*(1-gFrac),lh);
+          ctx.globalAlpha=sel?1:0.35;
+        }
+      } else {                                                  // hollow square
+        ctx.globalAlpha=1;
+        ctx.strokeStyle=sel?'#565664':'#2e2e3a'; ctx.lineWidth=1;  // outline itself carries dimness
+        ctx.strokeRect(x0+c*cw+0.5,y+0.5,cw,lh-1);
+        if(sOn&&!anyVoice){                                     // bare gate: hollow + lane-color bottom bar
+          ctx.fillStyle=DPAL[li%DPAL.length]; ctx.globalAlpha=sel?0.55:0.3;
+          ctx.fillRect((x0+c*cw|0)+1,y+lh-3,cw-2,2);
+          ctx.globalAlpha=sel?1:0.35;
+        }
       }
-      if(playing&&pos===s){ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillRect(x0+c*cw,y,cw,1);}
+      if(isCur){                                                // cursor hit: white outline
+        ctx.globalAlpha=1; ctx.strokeStyle='#f0f0f6'; ctx.lineWidth=1;
+        ctx.strokeRect(x0+c*cw+0.5,y+0.5,cw,lh-1);
+      }
     }
     ctx.globalAlpha=1;
   }
-  // ---- rev.13c: single big card for drumSel (100px zone) ----
-  const py=115;
-  ctx.fillStyle='#101015'; ctx.fillRect(0,py,CH,101);
+  if(playing){                                                  // playhead = full-height column
+    const px=x0+(pos-pg*16)*(CH-x0)/16;
+    if(pos>=pg*16&&pos<pg*16+16){
+      ctx.fillStyle='rgba(255,255,255,.16)'; ctx.fillRect(px,16,(CH-x0)/16,nL*lh);
+      ctx.fillStyle='#fff'; ctx.fillRect(px,16,1,nL*lh);
+    }
+  }
+  // ---- r16e: text readout strip (56px) — hit feedback lives IN the lane cell ----
+  const py=160;
+  ctx.fillStyle='#101015'; ctx.fillRect(0,py,CH,56);
   ctx.fillStyle='#3a3a44'; ctx.fillRect(0,py,CH,1);
   const active=focusLayer==='edit';
-  ctx.fillStyle=active?'#2e2e3a':'#16161b'; ctx.fillRect(2,py+3,CH-4,94);
-  if(active){ctx.strokeStyle='#e6c84a';ctx.strokeRect(2.5,py+3.5,CH-5,93);}
   const s=cursor, vBase=trkOff(selTrack)+TK.steps+s*ST.size;
   let hit=-1;
   for(let vi=0;vi<stepU8(selTrack,s,'nvoices');vi++) if(H8[S+vBase+vi*4]===GM_DRUMS[drumSel]) hit=vi;
   const on=stepU8(selTrack,s,'on');
   const col=DPAL[drumSel%DPAL.length];
+  ctx.fillStyle=active?'#2e2e3a':'#16161b'; ctx.fillRect(2,py+3,CH-4,50);
+  if(active){ctx.strokeStyle='#e6c84a';ctx.strokeRect(2.5,py+3.5,CH-5,49);}
   ctx.fillStyle=col; ctx.font='14px monospace';
-  ctx.fillText(`${GM_SHORT[drumSel]} ${hit>=0?(on?'●':'○'):'─'}`,10,py+22);
-  if(hit>=0){
-    const vel=H8[S+vBase+hit*4+1], gate=H8[S+vBase+hit*4+2], prob=stepU8(selTrack,s,'prob');
-    ctx.fillStyle='#fff4d6'; ctx.font='11px monospace';
-    ctx.fillText(`V${vel}  G${gate===0xFF?'∞':(gate/4).toFixed(2)}  P${prob}%`,70,py+22);
-    const bx=10,bw=CH-20,by=py+32,bh=52;
-    ctx.fillStyle=`hsl(0,0%,${18+(vel/127)*55}%)`; ctx.fillRect(bx,by,bw,bh);
-    const frac=gate===0xFF?1:Math.min(1,(gate/4)/8);
-    ctx.fillStyle=col;                                          // instrument color = identity
-    const desat=prob/100;
-    ctx.globalAlpha=0.35+0.65*desat;                            // desat proxy via alpha over grey bg
-    ctx.fillRect(bx,by,Math.max(2,bw*frac),bh);
-    ctx.globalAlpha=1;
-  } else {
-    ctx.fillStyle='#55555f'; ctx.font='10px monospace';
-    ctx.fillText('此鼓此步无音 — 白键 toggle 写入',10,py+55);
-  }
-  drawFooter(focusLayer==='edit');
+  ctx.fillText(`${GM_SHORT[drumSel]} st${s+1}`,10,py+22);
+  ctx.fillStyle='#fff4d6'; ctx.font='11px monospace';
+  ctx.fillText(hit>=0?`V${H8[S+vBase+hit*4+1]}  G${H8[S+vBase+hit*4+2]===0xFF?'∞':(H8[S+vBase+hit*4+2]/4).toFixed(2)}  P${stepU8(selTrack,s,'prob')}%`:'-- toggle: white key',70,py+22);
+  ctx.fillStyle='#8a8a99'; ctx.font='9px monospace';
+  ctx.fillText('edit: VEL GAT PROB (in-cell feedback)',10,py+40);   // K1-K3 = footer labels mirrored
+  drawFooter(focusLayer==='edit', true);
 }
 
 /* ---------- rev.13 helpers: sorted voices + chord name (03 §4 rev.11) ---------- */
@@ -846,11 +866,36 @@ function panelEnc(role,n){
   const editFocus=(focusLayer==='edit'&&mode==='grid');     // rev.12: EDIT layer focus
   if(editFocus){                                            // ---- EDIT layer (03 §4) ----
     const t=selTrack, s=cursor;
+    const isDrum=trkU8(t,'channel')===9;
     const vBase=trkOff(t)+TK.steps+s*ST.size+ST.voices;
     const nv=stepU8(t,s,'nvoices');
     if(role===0){                                           // SELECT: cycle active voice
       editVoice=Math.max(0,Math.min(3,editVoice+(n>0?1:-1))); return;
     }
+    // r16e drum mapping (footer VEL GAT PROB): the edited voice = the drumSel drum's
+    // hit on the cursor step (melodic uses editVoice by pitch order; drum is 1:1)
+    if(isDrum){
+      let vi=-1;
+      for(let k2=0;k2<nv;k2++) if(H8[S+vBase+k2*4]===GM_DRUMS[drumSel]) vi=k2;
+      if(vi<0) return;                                      // that drum not on this step
+      if(role===3){                                         // K1 VEL (was PIT — drum pitch n/a)
+        const v=H8[S+vBase+vi*4+1];
+        M._ds_note_set_wasm(t,s,vi,-1,Math.max(1,Math.min(127,v+n)),-1); return;
+      }
+      if(role===4){                                         // K2 GATE (same semantics as melodic)
+        const g=H8[S+vBase+vi*4+2];
+        let ng;
+        if(g===0xFF) ng = n>0 ? 1 : 0xFF;
+        else { ng=g+n; if(ng>32){ng=0xFF;} if(ng<1){ng=1;} }
+        M._ds_note_set_wasm(t,s,vi,-1,-1,ng); return;
+      }
+      if(role===5){                                         // K3 PROB (step-level, was K4)
+        const p=stepU8(t,s,'prob');
+        H8[S+stepOff(t,s)+ST.prob]=Math.max(0,Math.min(100,p+n*5)); return;
+      }
+      return;                                               // K4 spare (GLO+K4 falls through to rest/tie? no — drum K4 dead)
+    }
+    // r16e: editVoice derived AFTER drum branch (drum uses its own vi resolution)
     const av=Math.min(editVoice,Math.max(0,nv-1));
     if(nv===0) return;                                      // empty step: nothing to edit yet
     if(role===3){                                           // K1 PITCH (GLO held = COND)

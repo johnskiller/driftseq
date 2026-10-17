@@ -11,6 +11,10 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 LOG = 'crash.log'
 
 class H(SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header('Cache-Control', 'no-store')   # dev server: always fresh emu.js
+        super().end_headers()
+
     def do_POST(self):
         if self.path != '/crash-beacon':
             self.send_error(404); return
