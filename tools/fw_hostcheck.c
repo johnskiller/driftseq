@@ -1,0 +1,162 @@
+/* tools/fw_hostcheck.c — host-side compile + behavior check of the FM-1 app
+ * layer (firmware/src/ui_*.c) against stubs of the Felucca platform surface.
+ * Catches C errors and interaction-logic bugs without the JieLi toolchain.
+ * Build: gcc -Wall -O1 -I host -I firmware -I firmware/src tools/fw_hostcheck.c -o /tmp/fw_hostcheck
+ * The engine (host/driftseq.c + demo_pattern.c) is compiled UNCHANGED — the
+ * same files the firmware uses. 21 behavioral checks, see main(). */
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "driftseq.h"
+
+/* ---- platform surface stubs (gfx.c / libc.c / fm1_input.h) ---- */
+#define RGB(r,g,b) ((uint16_t)((((r)>>3)<<11)|(((g)>>2)<<5)|((b)>>3)))
+#define C_BLACK 0
+#define C_WHITE 0xFFFF
+#define C_DIM RGB(74,74,82)
+#define C_GRAY RGB(150,150,158)
+#define C_AMB RGB(200,200,90)
+#define C_HI RGB(80,220,120)
+typedef struct { uint8_t h,pad,first,last; const uint8_t *adv,*bw; const uint16_t *off; const uint8_t *data; } felucca_font_t;
+static const felucca_font_t FONT_S = {8,0,32,126,0,0,0,0}, FONT_M = {12,0,32,126,0,0,0,0};
+static uint16_t cv_px[240*240];
+static uint32_t cv_w = 240, cv_h = 240; static int32_t cv_oy, cv_y0, cv_y1 = 240;
+static void cv_begin(uint32_t w, uint32_t h, uint16_t bg){ uint32_t i; cv_w=w; cv_h=h; cv_oy=cv_y0=0; cv_y1=(int32_t)h; for(i=0;i<w*h;i++) cv_px[i]=bg; }
+static void cv_blit(uint32_t x, uint32_t y){ (void)x;(void)y; }
+static void cv_rect(int32_t x,int32_t y,int32_t w,int32_t h,uint16_t c){ (void)x;(void)y;(void)w;(void)h;(void)c; }
+static void cv_line(int32_t x0,int32_t y0,int32_t x1,int32_t y1,uint16_t c){ (void)x0;(void)y0;(void)x1;(void)y1;(void)c; }
+static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char *s, uint16_t c){ (void)f;(void)c;(void)y; while(*s++)x+=6; return x; }
+static void lcd_fill(uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint16_t c){(void)x;(void)y;(void)w;(void)h;(void)c;}
+static void draw_text_box(uint32_t x,uint32_t y,uint32_t w,const felucca_font_t *f,const char *s,uint16_t c,int a){(void)x;(void)y;(void)w;(void)f;(void)s;(void)c;(void)a;}
+static void fmt_int(char *b, int32_t v){ sprintf(b, "%d", (int)v); }
+
+#define FM1_NKEY 41u
+#define FM1_NENC 7u
+enum { B_FX, B_SEL, B_ENV, B_LFO, B_EDIT, B_GLO, B_HOME, B_SAVE, B_ARP, B_SEQ, B_PLAY, B_REC, B_OCTDN, B_OCTUP, NB };
+enum { EN_SELECT, EN_ALGO, EN_PRESET, EN_K1, EN_K2, EN_K3, EN_K4, NE };
+static volatile struct {
+    uint32_t notes, buttons, pressed, released, notes_pressed;
+    uint8_t raw[18], cnt[FM1_NKEY];
+    uint8_t enc_prev[FM1_NENC], enc_last[FM1_NENC], enc_rest[FM1_NENC], enc_home[FM1_NENC];
+    uint8_t enc_sth[FM1_NENC], enc_stc[FM1_NENC], enc_still[FM1_NENC];
+    int8_t enc_sub[FM1_NENC], enc_dir[FM1_NENC];
+    int16_t enc_steps[FM1_NENC];
+    uint32_t frames;
+} fm1_in;
+static uint32_t fm1_input_edges(uint32_t *released){ uint32_t p=fm1_in.pressed; if(released)*released=fm1_in.released; fm1_in.pressed=fm1_in.released=0; return p; }
+static uint32_t fm1_input_note_edges(void){ uint32_t p=fm1_in.notes_pressed; fm1_in.notes_pressed=0; return p; }
+static int32_t fm1_enc_take(uint32_t e){ int32_t v=fm1_in.enc_steps[e]; fm1_in.enc_steps[e]=0; return v; }
+typedef struct { uint32_t magic; uint8_t btn[14]; uint8_t enc[7]; int8_t dir[7]; } panel_t;
+static panel_t panel = {0x50414E35u,{2,3,4,5,6,7,8,9,10,11,12,13,0,1},{0,1,6,2,3,4,5},{1,1,1,1,1,1,1}};
+
+/* midi transport stub */
+typedef void (*midi_transport_fn)(uint8_t st, uint8_t d1, uint8_t d2);
+static midi_transport_fn midi_transport_send;
+static void midi_transport_usb3(uint8_t st, uint8_t d1, uint8_t d2){ (void)st;(void)d1;(void)d2; }
+static int plat_midi_in(uint32_t *pkt){ (void)pkt; return 0; }
+
+/* engine state: the app expects the symbol g (host/driftseq.c defines
+ * ds_state as struct; wasm shim uses a pointer — host code takes &g) */
+#include "driftseq.c"
+#include "demo_pattern.c"
+ds_state g;
+
+/* ---- app layer, unity order ---- */
+#include "../firmware/src/ui_glue.c"
+#include "../firmware/src/ui_tables.c"
+#include "../firmware/src/ui_text.c"
+#include "../firmware/src/ui.c"
+#include "../firmware/src/ui_input.c"
+#include "../firmware/src/ui_screens.c"
+#include "../firmware/src/ui_edit.c"
+
+
+/* ---- extended asserts ---- */
+static int fails;
+#define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); fails++; } else printf("ok: %s\n", msg); } while (0)
+
+int main(void)
+{
+    uint8_t vi; int found;
+    ds_state_init();
+    ui_init();
+
+    /* 1. boot: HOME mode, demo loaded (trk0 = kick E(16,4) with 36s) */
+    CHECK(ui_mode == M_HOME, "boot mode HOME");
+    CHECK(g.pat.track[0].channel == 9, "trk0 is drum");
+    { int c = 0, s; for (s = 0; s < 64; s++) if (g.pat.track[0].steps[s].nvoices) c++; }
+    CHECK(g.pat.track[0].steps[0].nvoices == 1 && g.pat.track[0].steps[0].v[0].note == 36, "trk0 st0 KCK");
+
+    /* 2. SEQ -> GRID on drum track, black key selects drum lane */
+    ui_button(B_SEQ, 1, 1);
+    CHECK(ui_mode == M_GRID, "SEQ enters GRID");
+    CHECK(is_drum_trk(), "trk0 drum grid");
+    panel_key_handler(5, 1);               /* idx5 = note58 A#3 = black ordinal 2 */
+    CHECK(drum_sel == 2, "black key idx5 (A#3) -> lane2 (TOM)");
+
+    /* 3. white key toggles the sel drum on its mapped step (key idx14 =
+     *    note 67 G4 = white index 8 → page step 8; toggle there) */
+    drum_sel = 0;                           /* KCK */
+    { uint8_t s8 = TRK()->steps[8].nvoices; panel_key_handler(14, 1);
+      CHECK(TRK()->steps[8].nvoices == s8 - 1, "white key (idx14->step8) removes KCK");
+      panel_key_handler(14, 1);
+      found = 0;
+      for (vi = 0; vi < TRK()->steps[0].nvoices; vi++) if (TRK()->steps[0].v[vi].note == 36) found = 1;
+      CHECK(found, "white key re-adds KCK"); }
+
+    /* 4. cursor dead-stop (rev.9) */
+    cursor = 0; ui_encoder(1, -1);
+    CHECK(cursor == 0, "K1 left at st0 dead-stops");
+    cursor = 63; ui_encoder(1, 1);
+    CHECK(cursor == 63, "K1 right at st63 dead-stops");
+    cursor = 0; glo_held = 1; ui_encoder(1, 1); glo_held = 0;
+    CHECK(cursor == 16, "GLO+K1 = x16 jump");
+
+    /* 5. EDIT layer: drum VEL edit hits the right voice (r16f mapping) */
+    cursor = 0; drum_sel = 0; ui_button(B_EDIT, 1, 1);
+    { uint8_t v0 = TRK()->steps[0].v[0].vel;
+      ui_encoder(1, -1);                   /* K1 VEL -2 (127 is cap; test -1 detent) */
+      CHECK(TRK()->steps[0].v[0].vel == v0 - 2, "EDIT K1 VEL -2 on drum");
+      CHECK(focus_layer == 1, "EDIT toggles focus layer"); }
+    ui_button(B_EDIT, 1, 1);               /* exit EDIT */
+    CHECK(focus_layer == 0, "EDIT exits");
+
+    /* 6. ARP FREE freeze (lesson 60): K1 on freed track = meta only */
+    ui_button(B_ARP, 1, 1);
+    CHECK(ui_mode == M_ARP, "ARP enters");
+    CHECK(g.pat.track[0].eu_on == 1, "demo trk0 linked at boot");
+    ui_arp_encoder(4, -1);                 /* FREE */
+    CHECK(g.pat.track[0].eu_on == 0, "K4 left = FREE");
+    { uint8_t on3 = g.pat.track[0].steps[3].on, k0 = g.pat.track[0].eu_k;
+      ui_arp_encoder(1, 1);
+      CHECK(g.pat.track[0].eu_on == 0, "K1 on FREE track does NOT re-link");
+      CHECK(g.pat.track[0].eu_k == k0 + 1, "K1 still updates meta");
+      CHECK(g.pat.track[0].steps[3].on == on3, "pattern bits untouched while FREE"); }
+    ui_arp_encoder(4, 1);                  /* re-link */
+    CHECK(g.pat.track[0].eu_on == 1, "K4 right re-links");
+
+    /* 7. engine ticks deterministically (golden hash contract lives in wasmtest;
+     * here: play produces output bytes on ch10 drum track) */
+    ds_play(&g);
+    { int i; unsigned first_st = 0; g.out_len = 0;
+      /* accumulate everything, then scan: must contain note-on 0x99 (kick) */
+      static uint8_t stream[16384]; unsigned slen = 0;
+      for (i = 0; i < 2000; i++) {
+        if (slen + g.out_len < sizeof stream) { memcpy(stream + slen, g.out, g.out_len); slen += g.out_len; }
+        g.out_len = 0; ds_tick(&g, 0.001); }
+      CHECK(slen > 0, "ds_tick produces MIDI bytes over 2000 ticks");
+      first_st = 0;
+      for (i = 0; i + 2 < (int)slen; i += 3)
+        if ((stream[i] & 0xF0) == 0x90 && (stream[i] & 0x0F) == 9) { first_st = 1; break; }
+      CHECK(first_st, "note-on 0x99 (ch10 kick) in stream");
+    }
+
+    /* 8. draw calls smoke (no crash, all four screens) */
+    ui_mode = M_HOME; ui_draw();
+    ui_button(B_SEQ, 1, 1); ui_draw();
+    { uint8_t t; for (t = 1; t < 5; t++) { sel_track = t; ui_draw(); } }
+    ui_button(B_ARP, 1, 1); ui_draw();
+    printf(fails ? "== %d FAILURES ==\n" : "ALL FW HOST CHECKS PASSED\n", fails);
+    return fails ? 1 : 0;
+}
