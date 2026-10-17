@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r15b 10-16';
+const BUILD='r16b 10-17';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -198,6 +198,14 @@ function drawHome(){
 /* ---------- the screen: SEQ grid (03-screens) ---------- */
 function drawGrid(){
   if(trkU8(selTrack,'channel')===9) return drawDrumGrid();      // ch10 = drum lanes view
+  // rev.16B: pitch span of this track's voices (for Y=pitch line mapping); 0 voices →
+  // frac 0.5 fallback (centered), single note → span 0 → 0.5
+  trkPMin=127; trkPMax=0;
+  for(let s2=0;s2<STEPS;s2++){
+    const n2=stepU8(selTrack,s2,'nvoices'), vB2=trkOff(selTrack)+TK.steps+s2*ST.size+ST.voices;
+    for(let vi=0;vi<n2;vi++){ const p=H8[S+vB2+vi*4]; if(p<trkPMin)trkPMin=p; if(p>trkPMax)trkPMax=p; }
+  }
+  if(trkPMin>trkPMax){ trkPMin=48; trkPMax=72; }                // empty track: default C3–C5
   ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
   ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,16);
   ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
@@ -225,8 +233,12 @@ function drawGrid(){
       ctx.fillRect(x+2,y+chh-4,cw-4,3);                         // bottom bar = "will fire, no note"
       ctx.globalAlpha=1;
     }
+    // rev.16B (#18): line Y = pitch, normalized to this track's voice min..max —
+    // contour visible across the stack of cells; overlap = small interval (kept ≥1px apart)
     for(let li=0;li<vs.length;li++){
-      const v=vs[li], lineY=y+chh-4-li*5;                       // slot i: bottom-up (high pitch top)
+      const v=vs[li];
+      const span=trkPMax-trkPMin, frac=span?(v.note-trkPMin)/span:0.5;
+      const lineY=Math.round(y+4+(1-frac)*(chh-11))+li;         // li: +1px if same pitch row
       if(!on){                                                  // rest: hollow/dashed line
         ctx.fillStyle='#666672'; ctx.fillRect(x+3,lineY,cw-6,1);
       } else {
@@ -530,6 +542,7 @@ const WHITE_POS=k=>KEY_WHITE.indexOf(k);         // white key ordinal 0..15 = st
 /* Drum GRID editing (spec 02 §2.1 / 03 §2.3): black keys = pick instrument, white keys =
  * toggle that drum across the 16 steps of the keybed page. TR-808 muscle memory. */
 let drumSel=0;                                   // index into GM_DRUMS (black-key order)
+let trkPMin=48, trkPMax=72;                      // rev.16B: selected track voice span (drawGrid)
 const GM_SHORT=['KCK','SNR','CHH','OHH','CUP','TOM','RID','PERC','SHK','CAB','MAR'];
 function drumKeyHandler(pressed,down,released){
   const t=selTrack, inGrid=mode==='grid';
