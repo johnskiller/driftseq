@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r16h 10-17';
+const BUILD='r16i 10-17';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -328,6 +328,15 @@ function drawDrumGrid(){
   ctx.font='8px monospace';
   const GAP=4;                                                 // r16h: smaller cells, wider gaps
   const cw=Math.floor((CH-x0)/16), chh=lh-GAP;                 // cell 9x9 inside a 13x13 pitch
+  const laneInUse=[];                                          // r16i: does this drum voice ANY step?
+  for(let li=0;li<nL;li++){
+    let used=false;
+    for(let s2=0;s2<64&&!used;s2++){
+      const nv2=stepU8(selTrack,s2,'nvoices'), vB2=trkOff(selTrack)+TK.steps+s2*ST.size+ST.voices;
+      for(let vi=0;vi<nv2;vi++) if(H8[S+vB2+vi*4]===GM_DRUMS[li]) used=true;
+    }
+    laneInUse.push(used);
+  }
   for(let li=0;li<nL;li++){
     const y=y0+li*lh, sel=li===drumSel;
     ctx.fillStyle=sel?'#c9c9d4':'#6a6a76';
@@ -362,9 +371,9 @@ function drawDrumGrid(){
         ctx.globalAlpha=1;
         ctx.strokeStyle=sel?'#565664':'#2e2e3a'; ctx.lineWidth=1;  // outline itself carries dimness
         ctx.strokeRect(cx+0.5,cyy+0.5,cellW-1,cellH-1);
-        if(sOn&&!anyVoice&&sel){                                // bare gate: sel lane only (r16h fix:
-          ctx.fillStyle=DPAL[li%DPAL.length]; ctx.globalAlpha=0.55;  // tick on every lane = column noise)
-          ctx.fillRect(cx+1,cyy+cellH-3,cellW-2,2);
+        if(sOn&&!anyVoice&&sel&&laneInUse[li]){                 // r16i: tick only if this drum is
+          ctx.fillStyle=DPAL[li%DPAL.length]; ctx.globalAlpha=0.55;  // voiced somewhere — empty lane
+          ctx.fillRect(cx+1,cyy+cellH-3,cellW-2,2);             // gets NO ticks (John: TOM confusion)
           ctx.globalAlpha=sel?1:0.35;
         }
       }
