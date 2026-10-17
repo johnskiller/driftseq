@@ -1,7 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* The few libc routines the compiler may call implicitly (struct copies,
- * zeroing). Freestanding: no other libc. */
+ * zeroing). Freestanding: no other libc.
+ * DS_LIBC_FMT_ONLY (web build): include only the number formatters —
+ * memset/memcpy/memcmp would clash with real libc there. */
+#ifndef DS_LIBC_FMT_ONLY
 void *memset(void *d, int c, unsigned n)
 {
     unsigned char *p = d;
@@ -27,6 +30,7 @@ int memcmp(const void *a, const void *b, unsigned n)
             return *p - *q;
     return 0;
 }
+#endif /* !DS_LIBC_FMT_ONLY */
 
 static int str_eq(const char *a, const char *b)
 {

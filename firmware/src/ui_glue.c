@@ -24,6 +24,7 @@ static void ui_home_encoder(uint8_t enc, int8_t det);
 static void ui_encoder(uint8_t enc, int8_t det);
 static void ui_button(uint8_t btn, uint8_t down, uint8_t released);
 static void panel_key_handler(uint8_t key, uint8_t down);
+static void panel_key_up(uint8_t key);
 static void ui_input_poll(void);
 static void ui_draw(void);
 static void ui_init(void);

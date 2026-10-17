@@ -10,19 +10,19 @@ static void ui_draw_footer(void)
     static const char *const FOOT_GRID[] = {"STEP", "LEN", "MUTE", "PROB"};
     static const char *const FOOT_EDIT[] = {"PIT", "GAT", "VEL", "PROB", "SEL"};
     static const char *const FOOT_DRUM[] = {"VEL", "GAT", "PROB"};
-    static const uint8_t FX[5] = {6, 62, 118, 174, 200};
+    static const uint8_t FX[5] = {8, 64, 120, 176, 204};   /* T 12px widths (STEP=20..) */
     uint8_t k;
     cv_begin(240, 24, C_BLACK);
     if (ui_mode == M_GRID && is_drum_trk() && focus_layer) {
         for (k = 0; k < 3; k++)
-            cv_text(FX[k], 7, &FONT_S, FOOT_DRUM[k], C_AMB);
+            cv_text(FX[k], 6, &FONT_T, FOOT_DRUM[k], C_AMB);
     } else if (ui_mode == M_GRID && focus_layer) {
         for (k = 0; k < 5; k++)
-            cv_text(FX[k], 7, &FONT_S, FOOT_EDIT[k], C_AMB);
+            cv_text(FX[k], 6, &FONT_T, FOOT_EDIT[k], C_AMB);
     } else {
         const char *const *f = (ui_mode == M_HOME) ? FOOT_HOME : FOOT_GRID;
         for (k = 0; k < 4; k++)
-            cv_text(FX[k], 7, &FONT_S, f[k], C_GRAY);
+            cv_text(FX[k], 6, &FONT_T, f[k], C_GRAY);
     }
     cv_blit(0, 216);
 }
@@ -32,7 +32,7 @@ static void draw_home(void)
 {
     uint8_t t;
     cv_begin(240, 224, RGB565(0, 0, 0));
-    cv_text(6, 3, &FONT_S, "HOME", RGB565(217, 217, 232));
+    cv_text(6, 2, &FONT_T, "HOME", RGB565(217, 217, 232));
     for (t = 0; t < 16; t++) {
         ds_track *tr = &g.pat.track[t];
         int y = t * 13 + 18;                     /* 16 rows x 13px = 208 */
@@ -49,7 +49,7 @@ static void draw_home(void)
         }
         /* playhead */
         cv_rect(28 + (int)g.pos16[t] * 3, y, 1, 10, C_WHITE);
-        cv_text(2, y, &FONT_S, "T", tr->mute ? C_DIM : col);
+        cv_text(2, y + 1, &FONT_T, "T", tr->mute ? C_DIM : col);
     }
     cv_blit(0, 0);
     ui_draw_footer();
@@ -73,7 +73,7 @@ static void draw_grid_melodic(void)
 
     title = txt_join("SEQ TRK", txt_trk("", sel_track + 1));
     cv_begin(240, 224, C_BLACK);
-    cv_text(6, 3, &FONT_S, title, RGB565(217, 217, 232));
+    cv_text(6, 2, &FONT_T, title, RGB565(217, 217, 232));
     /* 4 rows x 24px (y16..112) + embedded EDIT panel 104px (rev.12 budget) */
     for (r = 0; r < 4; r++) {
         int y = 16 + r * 24;
@@ -122,16 +122,16 @@ static void draw_grid_drum(void)
         }
     }
     title = txt_join(txt_trk("DRUM TRK", sel_track + 1),
-                     txt_join("· p", txt_trk("/4", page + 1)));
+                     txt_join("P", txt_join(txt_trk("", page + 1), "/4")));
     cv_begin(240, 160, C_BLACK);
-    cv_text(6, 3, &FONT_S, title, RGB565(217, 217, 232));
-    cv_text(150, 3, &FONT_S, txt_join(txt_st(cursor + 1), GM_SHORT[drum_sel]),
+    cv_text(6, 2, &FONT_T, title, RGB565(217, 217, 232));
+    cv_text(150, 2, &FONT_T, txt_join(txt_st(cursor + 1), GM_SHORT[drum_sel]),
             TRK()->mute ? RGB565(90, 90, 98) : RGB565(95, 224, 138));
     for (li = 0; li < 11; li++) {
         int y = y0 + li * lh;
         uint8_t sel = (li == drum_sel);
         uint16_t stroke = sel ? RGB565(86, 86, 100) : RGB565(46, 46, 58);
-        cv_text(2, y + 3, &FONT_S, GM_SHORT[li], sel ? RGB565(201, 201, 212) : RGB565(106, 106, 118));
+        cv_text(2, y + 2, &FONT_T, GM_SHORT[li], sel ? RGB565(201, 201, 212) : RGB565(106, 106, 118));
         for (c = 0; c < 16; c++) {
             int s = page * 16 + c;
             ds_step *st = &TRK()->steps[s];

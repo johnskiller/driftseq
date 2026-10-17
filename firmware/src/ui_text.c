@@ -35,7 +35,7 @@ static char *txt_trk(const char *prefix, uint8_t one_based)
 /* "st%d" — 1-based step (rev.9 display convention) */
 static char *txt_st(uint8_t one_based)
 {
-    return txt_trk("st", one_based);
+    return txt_trk("ST", one_based);
 }
 
 /* "KCK st17" — join with a space */

@@ -32,11 +32,11 @@ static void ui_draw_edit_panel(void)
                 *w++ = ' '; *w++ = 'v';
                 fmt_int(w, st->v[r].vel);
             }
-            cv_text(6, y + 8, &FONT_S, line, C_BLACK);
+            cv_text(6, y + 5, &FONT_XS, line, C_BLACK);
             if (active)
                 cv_rect(0, y, 239, 1, RGB565(230, 200, 74));
         } else {
-            cv_text(6, y + 8, &FONT_S, "--", C_DIM);
+            cv_text(6, y + 5, &FONT_XS, "--", C_DIM);
         }
     }
     cv_blit(0, 112);
@@ -51,15 +51,15 @@ static void ui_draw_readout(void)
         if (st->v[vi].note == GM_DRUMS[drum_sel]) hit = vi;
     cv_begin(240, 56, RGB565(16, 16, 21));
     cv_rect(0, 0, 240, 1, RGB565(58, 58, 68));
-    cv_text(10, 8, &FONT_M, txt_join(GM_SHORT[drum_sel], txt_st(cursor + 1)), D_PAL[drum_sel]);
+    cv_text(10, 10, &FONT_XS, txt_join(GM_SHORT[drum_sel], txt_st(cursor + 1)), D_PAL[drum_sel]);
     if (hit >= 0)
-        cv_text(70, 10, &FONT_S,
+        cv_text(74, 10, &FONT_XS,
                 txt_vgp(st->v[hit].vel,
                         st->v[hit].gate == 0xFF ? 0 : st->v[hit].gate,
                         st->prob), RGB565(255, 244, 214));
     else
-        cv_text(70, 10, &FONT_S, "-- toggle: white key", RGB565(255, 244, 214));
-    cv_text(10, 34, &FONT_S, "edit: VEL GAT PROB", RGB565(138, 138, 153));
+        cv_text(74, 10, &FONT_XS, "-- toggle: white key", RGB565(255, 244, 214));
+    cv_text(10, 34, &FONT_XS, "edit: VEL GAT PROB", RGB565(138, 138, 153));
     cv_blit(0, 160);
 }
 
@@ -77,7 +77,7 @@ static void draw_arp(void)
     ds_track *tr = TRK();
     int i;
     cv_begin(240, 224, C_BLACK);
-    cv_text(6, 3, &FONT_S, tr->eu_on ? "*LINK" : "FREE",
+    cv_text(6, 2, &FONT_T, tr->eu_on ? "*LINK" : "FREE",
             tr->eu_on ? RGB565(95, 224, 138) : RGB565(90, 90, 98));
     /* result strip y16..28: what the loop plays (hero grammar) */
     for (i = 0; i < 64; i++)
@@ -86,7 +86,7 @@ static void draw_arp(void)
     cv_rect(28 + (int)g.pos16[sel_track] * 3, 16, 1, 12, C_WHITE);
     /* ring zone y28..196: one canvas pass, ring + numbers drawn into it */
     ui_draw_ring_onto_main();
-    cv_text(4, 200, &FONT_S, txt_knr(tr->eu_k, tr->eu_n, tr->eu_rot), C_AMB);
+    cv_text(4, 202, &FONT_XS, txt_knr(tr->eu_k, tr->eu_n, tr->eu_rot), C_AMB);
     cv_blit(0, 0);
     ui_draw_footer();
 }
@@ -115,19 +115,19 @@ static void ui_draw_ring_onto_main(void)
 static void ui_home_encoder(uint8_t enc, int8_t det)
 {
     ds_track *tr = TRK();
-    if (enc == 1) {                              /* K1 LOOP START (dead-stop) */
+    if (enc == EN_K1) {                          /* K1 LOOP START (dead-stop) */
         int v = tr->loop_start + det;
         if (v < 0) v = 0;
         if (v > 63) v = 63;
         tr->loop_start = (uint8_t)v;
-    } else if (enc == 2) {                       /* K2 LEN 1..64 */
+    } else if (enc == EN_K2) {                   /* K2 LEN 1..64 */
         int v = tr->loop_len + det;
         if (v < 1) v = 1;
         if (v > 64) v = 64;
         tr->loop_len = (uint8_t)v;
-    } else if (enc == 3 && det > 0) {            /* K3 MUTE: right = on */
+    } else if (enc == EN_K3 && det > 0) {        /* K3 MUTE: right = on */
         tr->mute = tr->mute ? 0 : 1;
-    } else if (enc == 4) {                       /* K4 PROB 0..100 */
+    } else if (enc == EN_K4) {                   /* K4 PROB 0..100 */
         int v = tr->steps[cursor].prob + det * 5;
         if (v < 0) v = 0;
         if (v > 100) v = 100;
@@ -137,10 +137,10 @@ static void ui_home_encoder(uint8_t enc, int8_t det)
 
 static void ui_grid_encoder(uint8_t enc, int8_t det)
 {
-    if (enc == 1) cursor_move(det);              /* K1 cursor (GLO+K1 x16) */
-    else if (enc == 2) ui_home_encoder(2, det);  /* K2 LEN */
-    else if (enc == 3 && det > 0) { TRK()->mute ^= 1; }
-    else if (enc == 4) ui_home_encoder(4, det);  /* K4 PROB */
+    if (enc == EN_K1) cursor_move(det);          /* K1 cursor (GLO+K1 x16) */
+    else if (enc == EN_K2) ui_home_encoder(EN_K2, det);   /* K2 LEN */
+    else if (enc == EN_K3 && det > 0) { TRK()->mute ^= 1; }
+    else if (enc == EN_K4) ui_home_encoder(EN_K4, det);   /* K4 PROB */
 }
 
 static void ui_edit_encoder(uint8_t enc, int8_t det)
@@ -151,17 +151,17 @@ static void ui_edit_encoder(uint8_t enc, int8_t det)
         for (vi = 0; vi < st->nvoices; vi++)
             if (st->v[vi].note == GM_DRUMS[drum_sel]) hit = vi;
         if (hit < 0) return;
-        if (enc == 1) {
+        if (enc == EN_K1) {
             int v = st->v[hit].vel + det * 2;
             if (v < 1) v = 1;
             if (v > 127) v = 127;
             st->v[hit].vel = (uint8_t)v;
-        } else if (enc == 2) {
+        } else if (enc == EN_K2) {
             int v = st->v[hit].gate + det;
             if (v < 1) v = 1;
             if (v > 32) v = 32;
             st->v[hit].gate = (uint8_t)v;
-        } else if (enc == 3) {
+        } else if (enc == EN_K3) {
             int v = st->prob + det * 5;
             if (v < 0) v = 0;
             if (v > 100) v = 100;
@@ -170,28 +170,28 @@ static void ui_edit_encoder(uint8_t enc, int8_t det)
         return;
     }
     /* melodic: PIT GAT VEL PROB SEL */
-    if (enc == 5) {
+    if (enc == EN_SELECT) {
         int v = edit_voice + det;
         if (v < 0) v = 0;
         if (v > 3) v = 3;
         edit_voice = (uint8_t)v;
     } else if (edit_voice < st->nvoices && st->v[edit_voice].note != 0xFF) {
-        if (enc == 1) {
+        if (enc == EN_K1) {
             int v = st->v[edit_voice].note + det * 12;
             if (v < 0) v = 0;
             if (v > 127) v = 127;
             st->v[edit_voice].note = (uint8_t)v;
-        } else if (enc == 2) {
+        } else if (enc == EN_K2) {
             int v = st->v[edit_voice].gate + det;
             if (v < 1) v = 1;
             if (v > 32) v = 32;
             st->v[edit_voice].gate = (uint8_t)v;
-        } else if (enc == 3) {
+        } else if (enc == EN_K3) {
             int v = st->v[edit_voice].vel + det * 2;
             if (v < 1) v = 1;
             if (v > 127) v = 127;
             st->v[edit_voice].vel = (uint8_t)v;
-        } else if (enc == 4) {
+        } else if (enc == EN_K4) {
             int v = st->prob + det * 5;
             if (v < 0) v = 0;
             if (v > 100) v = 100;
@@ -203,7 +203,7 @@ static void ui_edit_encoder(uint8_t enc, int8_t det)
 static void ui_arp_encoder(uint8_t enc, int8_t det)
 {
     ds_track *tr = TRK();
-    if (enc == 4) {                              /* K4 LINK */
+    if (enc == EN_K4) {                          /* K4 LINK */
         if (det > 0) {
             uint8_t k = tr->eu_k ? tr->eu_k : 4, n = tr->eu_n ? tr->eu_n : 16;
             tr->eu_on = 1;
@@ -221,18 +221,18 @@ static void ui_arp_encoder(uint8_t enc, int8_t det)
         return;
     }
     if (!tr->eu_n) tr->eu_n = 16;
-    if (enc == 1) {
+    if (enc == EN_K1) {
         int v = tr->eu_k + det;
         if (v < 1) v = 1;
         if (v > tr->eu_n) v = tr->eu_n;
         tr->eu_k = (uint8_t)v;
-    } else if (enc == 2) {
+    } else if (enc == EN_K2) {
         int v = tr->eu_n + det;
         if (v < 2) v = 2;
         if (v > 64) v = 64;
         tr->eu_n = (uint8_t)v;
         if (tr->eu_k > tr->eu_n) tr->eu_k = tr->eu_n;
-    } else if (enc == 3) {
+    } else if (enc == EN_K3) {
         int v = tr->eu_rot + det;
         if (v < 0) v = 0;
         if (v > tr->eu_n - 1) v = tr->eu_n - 1;
@@ -242,16 +242,22 @@ static void ui_arp_encoder(uint8_t enc, int8_t det)
         ds_euclid_fill(tr);                      /* link re-fills; FREE = meta only (lesson 60) */
 }
 
-/* ---- routing: encoders + buttons ---- */
+/* ---- routing: encoders + buttons ----
+ * Encoder ids here are the LOGICAL roles (plat_ctrl.h EN_*): EN_SELECT=0,
+ * EN_ALGO=1, EN_PRESET=2, EN_K1..K4=3..6. The per-page handlers use
+ * K1..K4 = 3..6 (emu panelEnc role numbers), so select-track is matched
+ * explicitly and everything else passes through. */
 static void ui_encoder(uint8_t enc, int8_t det)
 {
-    if (enc == 0) {                              /* SELECT: track, no wrap */
+    if (enc == EN_SELECT) {                      /* SELECT: track, no wrap */
         int next = sel_track + (det > 0 ? 1 : -1);
         if (next < 0) next = 0;
         if (next > 15) next = 15;
         sel_track = (uint8_t)next;
         return;
     }
+    if (enc == EN_ALGO || enc == EN_PRESET)
+        return;                                  /* BPM=ALGO: batch 3 (BPM→GLO 页待拍板) */
     if (ui_mode == M_ARP) { ui_arp_encoder(enc, det); return; }
     if (ui_mode == M_GRID) {
         if (focus_layer) ui_edit_encoder(enc, det);
@@ -264,15 +270,44 @@ static void ui_encoder(uint8_t enc, int8_t det)
 static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
 {
     (void)down;
+    if (!released)
+        return;                                   /* everything fires on the release edge */
     switch (btn) {
-    case B_HOME: if (released) { ui_mode = M_HOME; focus_layer = 0; } break;
-    case B_SEQ:  if (released) { ui_mode = M_GRID; } break;
-    case B_ARP:  if (released) { ui_mode = M_ARP; } break;
-    case B_EDIT: if (released && ui_mode == M_GRID) focus_layer ^= 1; break;
-    case B_PLAY: if (released) { if (g.playing) ds_stop(&g); else ds_play(&g); } break;
-    case B_OCTDN: if (released && ui_mode == M_GRID) { key_shift -= 12; if (key_shift < -24) key_shift = -24; } break;
-    case B_OCTUP: if (released && ui_mode == M_GRID) { key_shift += 12; if (key_shift > 24) key_shift = 24; } break;
-    default: break;
+    case B_HOME:                                  /* emu: HOME toggles HOME <-> GRID */
+        ui_mode = (ui_mode == M_HOME) ? M_GRID : M_HOME;
+        focus_layer = 0;
+        break;
+    case B_SEQ:  ui_mode = M_GRID; break;
+    case B_ARP:  ui_mode = M_ARP;  break;
+    case B_EDIT: if (ui_mode == M_GRID) focus_layer ^= 1; break;
+    case B_PLAY:
+        if (g.playing) ds_stop(&g);
+        else ds_play(&g);
+        break;
+    case B_REC:                                    /* v1: REC = cursor step toggle (emu) */
+        {   uint8_t on = TRK()->steps[cursor].on;
+            TRK()->steps[cursor].on = on ? 0 : 1;
+        }
+        break;
+    case B_OCTDN:
+        if (ui_mode == M_GRID && !glo_held && !focus_layer) {
+            key_shift -= 12; if (key_shift < -24) key_shift = -24;
+        } else if (ui_mode == M_GRID && (glo_held || focus_layer)) {
+            if (cursor > 0) cursor--;              /* GLO+OCT- / EDIT = cursor back (emu) */
+        } else {
+            key_shift -= 12; if (key_shift < -24) key_shift = -24;
+        }
+        break;
+    case B_OCTUP:
+        if (ui_mode == M_GRID && glo_held) {
+            /* GLO+OCT+ = rest/tie cycle — v1.1 (needs cond/tie semantics); no-op now */
+        } else if (ui_mode == M_GRID && focus_layer) {
+            if (cursor < 63) cursor++;             /* EDIT layer: cursor fwd (emu) */
+        } else {
+            key_shift += 12; if (key_shift > 24) key_shift = 24;
+        }
+        break;
+    default: break;                                /* SAVE/FX/ENV/LFO: v1 unsignaled */
     }
 }
 

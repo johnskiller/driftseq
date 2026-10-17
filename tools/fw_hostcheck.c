@@ -19,7 +19,8 @@
 #define C_AMB RGB(200,200,90)
 #define C_HI RGB(80,220,120)
 typedef struct { uint8_t h,pad,first,last; const uint8_t *adv,*bw; const uint16_t *off; const uint8_t *data; } felucca_font_t;
-static const felucca_font_t FONT_S = {8,0,32,126,0,0,0,0}, FONT_M = {12,0,32,126,0,0,0,0};
+static const felucca_font_t FONT_T = {12,0,32,95,0,0,0,0}, FONT_XS = {15,0,32,126,0,0,0,0},
+                           FONT_S = {16,0,32,126,0,0,0,0}, FONT_M = {24,0,32,95,0,0,0,0};
 static uint16_t cv_px[240*240];
 static uint32_t cv_w = 240, cv_h = 240; static int32_t cv_oy, cv_y0, cv_y1 = 240;
 static void cv_begin(uint32_t w, uint32_t h, uint16_t bg){ uint32_t i; cv_w=w; cv_h=h; cv_oy=cv_y0=0; cv_y1=(int32_t)h; for(i=0;i<w*h;i++) cv_px[i]=bg; }
@@ -105,18 +106,21 @@ int main(void)
       for (vi = 0; vi < TRK()->steps[0].nvoices; vi++) if (TRK()->steps[0].v[vi].note == 36) found = 1;
       CHECK(found, "white key re-adds KCK"); }
 
-    /* 4. cursor dead-stop (rev.9) */
-    cursor = 0; ui_encoder(1, -1);
+    /* 4. cursor dead-stop (rev.9) — K1 = EN_K1 (3) after batch-2 role fix */
+    cursor = 0; ui_encoder(EN_K1, -1);
     CHECK(cursor == 0, "K1 left at st0 dead-stops");
-    cursor = 63; ui_encoder(1, 1);
+    cursor = 63; ui_encoder(EN_K1, 1);
     CHECK(cursor == 63, "K1 right at st63 dead-stops");
-    cursor = 0; glo_held = 1; ui_encoder(1, 1); glo_held = 0;
+    cursor = 0; glo_held = 1; ui_encoder(EN_K1, 1); glo_held = 0;
     CHECK(cursor == 16, "GLO+K1 = x16 jump");
+    { uint8_t t0 = sel_track; ui_encoder(EN_SELECT, 1);
+      CHECK(sel_track == t0 + 1, "SELECT encoder moves track");
+      sel_track = 0; }                     /* tests below assume trk0 (drum) */
 
     /* 5. EDIT layer: drum VEL edit hits the right voice (r16f mapping) */
     cursor = 0; drum_sel = 0; ui_button(B_EDIT, 1, 1);
     { uint8_t v0 = TRK()->steps[0].v[0].vel;
-      ui_encoder(1, -1);                   /* K1 VEL -2 (127 is cap; test -1 detent) */
+      ui_encoder(EN_K1, -1);               /* K1 VEL -2 (127 is cap; test -1 detent) */
       CHECK(TRK()->steps[0].v[0].vel == v0 - 2, "EDIT K1 VEL -2 on drum");
       CHECK(focus_layer == 1, "EDIT toggles focus layer"); }
     ui_button(B_EDIT, 1, 1);               /* exit EDIT */
@@ -126,14 +130,14 @@ int main(void)
     ui_button(B_ARP, 1, 1);
     CHECK(ui_mode == M_ARP, "ARP enters");
     CHECK(g.pat.track[0].eu_on == 1, "demo trk0 linked at boot");
-    ui_arp_encoder(4, -1);                 /* FREE */
+    ui_arp_encoder(EN_K4, -1);             /* FREE */
     CHECK(g.pat.track[0].eu_on == 0, "K4 left = FREE");
     { uint8_t on3 = g.pat.track[0].steps[3].on, k0 = g.pat.track[0].eu_k;
-      ui_arp_encoder(1, 1);
+      ui_arp_encoder(EN_K1, 1);
       CHECK(g.pat.track[0].eu_on == 0, "K1 on FREE track does NOT re-link");
       CHECK(g.pat.track[0].eu_k == k0 + 1, "K1 still updates meta");
       CHECK(g.pat.track[0].steps[3].on == on3, "pattern bits untouched while FREE"); }
-    ui_arp_encoder(4, 1);                  /* re-link */
+    ui_arp_encoder(EN_K4, 1);              /* re-link */
     CHECK(g.pat.track[0].eu_on == 1, "K4 right re-links");
 
     /* 7. engine ticks deterministically (golden hash contract lives in wasmtest;
@@ -152,7 +156,31 @@ int main(void)
       CHECK(first_st, "note-on 0x99 (ch10 kick) in stream");
     }
 
-    /* 8. draw calls smoke (no crash, all four screens) */
+    /* 8. HOME button toggles HOME <-> GRID (emu parity, batch-2) */
+    ui_button(B_HOME, 1, 1);               /* currently GRID -> HOME */
+    CHECK(ui_mode == M_HOME, "HOME button returns to HOME");
+    ui_button(B_HOME, 1, 1);               /* HOME -> GRID */
+    CHECK(ui_mode == M_GRID, "HOME button re-enters GRID");
+
+    /* 9. REC toggles the cursor step's gate bit (emu parity) */
+    cursor = 5;
+    { uint8_t on5 = TRK()->steps[5].on;
+      ui_button(B_REC, 1, 1);
+      CHECK(TRK()->steps[5].on == !on5, "REC toggles cursor step");
+      ui_button(B_REC, 1, 1);
+      CHECK(TRK()->steps[5].on == on5, "REC toggles back"); }
+
+    /* 10. melodic key = live audition through the engine (ds_live_on) */
+    ui_button(B_HOME, 1, 1);
+    CHECK(ui_mode == M_HOME, "back to HOME for live keys");
+    { int n0 = (int)g.live_n;
+      panel_key_handler(0, 1);             /* key 0 = F3 = note 53 */
+      CHECK((int)g.live_n == n0 + 1, "melodic key starts live note");
+      CHECK(g.live[g.live_n - 1].note == 53 + key_shift, "live note = 53+key+shift");
+      panel_key_up(0);
+      CHECK((int)g.live_n == n0, "key up removes live note"); }
+
+    /* 11. draw calls smoke (no crash, all four screens) */
     ui_mode = M_HOME; ui_draw();
     ui_button(B_SEQ, 1, 1); ui_draw();
     { uint8_t t; for (t = 1; t < 5; t++) { sel_track = t; ui_draw(); } }

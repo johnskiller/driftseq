@@ -1,8 +1,14 @@
-/* ui_input.c — panel event extraction from fm1_input.h (part of ui.c unity
- * section, lives inside app.c so fm1_in/panel statics are visible).
- * Uses the HAL's official take functions (fm1_input_edges / note_edges /
- * fm1_enc_take) — edges are consumed in batch, then dispatched one-by-one. */
+/* ui_input.c — panel event extraction (part of the ui.c unity section).
+ * Two front-ends, one dispatch surface:
+ *   - firmware: fm1_input.h edges (fm1_input_edges / fm1_enc_take /
+ *     fm1_input_note_edges), key ids 0..40 (0..13 buttons, 14..40 keys).
+ *   - web (ui_web.c): ds_web_* injectors call ui_button/ui_encoder/
+ *     panel_key_handler directly with the SAME logical ids (no fm1_in there).
+ * Logical ids: buttons = plat_ctrl.h B_* enums; encoders = EN_* enums;
+ * panel_key_handler takes key ids 0..26 = notes 53..79 (F3..G5). */
 
+/* firmware front-end (fm1_in statics; compiled only in the unity root) */
+#ifndef DS_WEB_UI
 static void ui_input_poll(void)
 {
     uint32_t pr, re, np;
@@ -30,6 +36,7 @@ static void ui_input_poll(void)
     np = fm1_input_note_edges();
     for (i = 14u; i < FM1_NKEY; i++) {
         if (np & (1u << (i - 14u)))
-            panel_key_handler(i, 1);
+            panel_key_handler(i - 14u, 1);
     }
 }
+#endif /* DS_WEB_UI */

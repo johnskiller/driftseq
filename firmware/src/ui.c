@@ -29,18 +29,31 @@ static void ds_state_init(void)
     ds_load_demo(&g);
 }
 
+/* Full-canvas convention (batch 2): one cv_begin(240,224) pass per frame,
+ * each painter blits its band to the screen y it owns. cv_y0/y1 stay full so
+ * painters share the whole canvas (cross-band items like the drum playhead). */
+static void cv_frame_begin(void)
+{
+    cv_y0 = 0;
+    cv_y1 = (int32_t)cv_h;
+}
+
 static void ui_draw(void)
 {
-    cv_y0 = 0;                                /* full-canvas bands (x0x cv_band) */
-    cv_y1 = 240;
-    lcd_fill(0, 0, 240, 240, C_BLACK);
+    cv_begin(240, 224, C_BLACK);              /* painters blit their own bands */
     if (ui_mode == M_HOME) draw_home();
     else if (ui_mode == M_GRID) {
         if (is_drum_trk()) draw_grid_drum(); else draw_grid_melodic();
     } else draw_arp();
 }
 
-/* ---- panel matrix mapping (fm1-ctrl panel.c proven values) ---- */
+/* ---- panel matrix mapping (fm1-ctrl panel.c proven values) ----
+ * The web build has no panel_t (no calibration layer): its ui_web.c shim
+ * defines a compatible two-array stand-in (panel.btn/panel.enc) so this
+ * code compiles unchanged in both roots. */
+#ifndef DS_WEB_PANEL_SHIM
+static panel_t panel;
+#endif
 static uint8_t btn_role(uint8_t matrix_id)   /* matrix id -> logical button, 0xFF=none */
 {
     uint8_t i;
@@ -90,7 +103,8 @@ static uint8_t key_white_index(uint8_t key)        /* 0..15 = step-in-page */
     return ord;
 }
 
-/* black-key ordinal -> drum lane; white key -> toggle step (drum track) */
+/* black-key ordinal -> drum lane; white key -> toggle step (drum track).
+ * Non-grid keys = live preview through the engine (emu liveNote parity). */
 static void panel_key_handler(uint8_t key, uint8_t down)
 {
     if (!down)
@@ -113,9 +127,25 @@ static void panel_key_handler(uint8_t key, uint8_t down)
                 cursor = s;
             }
         }
+        return;
+    }
+    {   /* melodic live audition: note = 53 + key + key_shift (F3 base, rev.7) */
+        int note = 53 + (int)key + key_shift;
+        if (note < 0) note = 0;
+        if (note > 127) note = 127;
+        if (down) ds_live_on(&g, (uint8_t)sel_track, (uint8_t)note, 100);
     }
     /* melodic key entry (override semantics, rev.11): batch-2 polish lands
      * the chord/hold-step-picker paths; v1 batch 1 = single note write. */
+}
+
+/* key release -> note-off for the live preview (same pitch math as down) */
+static void panel_key_up(uint8_t key)
+{
+    int note = 53 + (int)key + key_shift;
+    if (note < 0) note = 0;
+    if (note > 127) note = 127;
+    ds_live_off(&g, (uint8_t)sel_track, (uint8_t)note);
 }
 
 static void ui_poll(void)
