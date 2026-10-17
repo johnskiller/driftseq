@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r16i 10-17';
+const BUILD='r16j 10-17';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -870,7 +870,11 @@ function panelEnc(role,n){
       if(role===3){ k=Math.max(1,Math.min(nn,k+n)); }      // K1: 1..N clamp
       if(role===4){ nn=Math.max(2,Math.min(64,nn+n)); k=Math.min(k,nn); }  // K2: 2..64, clamp k
       if(role===5){ rot=Math.max(0,Math.min(nn-1,rot+n)); } // K3: 0..N-1 dead-stop
-      M._ds_euclid_wasm(t,1,k,nn,rot);                     // every turn = re-fill (en bits only)
+      if(eu){                                              // r16j: FREE stays frozen —
+        M._ds_euclid_wasm(t,1,k,nn,rot);                   // meta k/nn/rot updates but
+      } else {                                             // no pattern rewrite while
+        M._ds_euclid_meta_wasm(t,k,nn,rot);                // unlinked (John: ticks after FREE)
+      }
       return;
     }
     return;                                                // ALGORITHM/PRESETS: unsignaled here

@@ -56,6 +56,14 @@ void ds_euclid_wasm(int trk, int on, int k, int n, int rot) {
     if (on) ds_euclid_fill(&g.pat.track[trk]);
 }
 EMSCRIPTEN_KEEPALIVE
+void ds_euclid_meta_wasm(int trk, int k, int n, int rot) {      /* r16j: meta-only
+    update while FREE — pattern stays frozen, K4 right re-links with new meta */
+    if (trk < 0 || trk >= DS_TRACKS) return;
+    g.pat.track[trk].eu_k = (uint8_t)k;
+    g.pat.track[trk].eu_n = (uint8_t)n;
+    g.pat.track[trk].eu_rot = (uint8_t)rot;
+}
+EMSCRIPTEN_KEEPALIVE
 void ds_set_loop_wasm(int trk, int start, int len) {
     if (trk < 0 || trk >= DS_TRACKS) return;
     if (start >= 0 && start < 64) g.pat.track[trk].loop_start = (uint8_t)start;
