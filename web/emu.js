@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r16b 10-17';
+const BUILD='r16c 10-17';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -209,7 +209,7 @@ function drawGrid(){
   ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
   ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,16);
   ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
-  ctx.fillText(`SEQ TRK ${selTrack+1} · p1/4`,6,12);
+  ctx.fillText(`SEQ TRK ${selTrack+1}`,6,12);                   // rev.16c: no p1/4 (rows P1-P4 labeled)
   ctx.fillStyle= trkU8(selTrack,'mute')?'#5a5a62':'#5fe08a';
   const cn=chordName(selTrack,cursor);
   ctx.fillText(`st${cursor+1}${cn?' '+cn:''}`,150,12);
@@ -312,10 +312,11 @@ function drawFooter(editFocus){
 
 /* ---------- the screen: drum lanes (03 §3 — ALL drums visible, selected lane lit) ---------- */
 function drawDrumGrid(){
+  const pg=cursor>>4;                                            // rev.16c: page follows cursor
   ctx.fillStyle='#000'; ctx.fillRect(0,0,CH,CH);
   ctx.fillStyle='#181820'; ctx.fillRect(0,0,CH,16);
   ctx.fillStyle='#d9d9e8'; ctx.font='11px monospace';
-  ctx.fillText(`DRUM TRK ${selTrack+1} · p1/4`,6,12);
+  ctx.fillText(`DRUM TRK ${selTrack+1} · p${pg+1}/4`,6,12);
   ctx.fillStyle= trkU8(selTrack,'mute')?'#5a5a62':'#5fe08a';
   ctx.fillText(`st${cursor+1} ${GM_SHORT[drumSel]||('D'+drumSel)}`,150,12);
   const nL=GM_DRUMS.length, lh=11, x0=30, y0=16;               // rev.13b: 9x11px lanes
@@ -326,7 +327,7 @@ function drawDrumGrid(){
     ctx.fillStyle=sel?'#c9c9d4':'#6a6a76';
     ctx.fillText(GM_SHORT[li],2,y+lh-3);
     for(let c=0;c<16;c++){
-      const s=page*16+c;
+      const s=pg*16+c;
       const vBase=trkOff(selTrack)+TK.steps+s*ST.size;
       let on=false, anyVoice=false;
       for(let vi=0;vi<stepU8(selTrack,s,'nvoices');vi++){
@@ -551,7 +552,7 @@ function drumKeyHandler(pressed,down,released){
       drumSel=KEY_BLACK_IDX.indexOf(k);          // black-key order = instrument order
       liveNote(k,true);                          // hear it
     } else if(inGrid){
-      const s=page*16+WHITE_POS(k);              // white key ordinal = step in page
+      const s=(cursor>>4)*16+WHITE_POS(k);       // keybed page follows cursor (rev.16c)
       const vBase=trkOff(t)+TK.steps+s*ST.size;
       let hit=-1;
       for(let vi=0;vi<stepU8(t,s,'nvoices');vi++) if(H8[S+vBase+vi*4]===GM_DRUMS[drumSel]) hit=vi;
@@ -784,7 +785,7 @@ function panelButton(ev){
         } else octShift(+1);
         break;
       case 'REC': M._ds_toggle_step_wasm(selTrack,cursor); break;  // v1: REC=cursor toggle
-      case 'HOME': mode = mode==='home'?'grid':'home'; page=0; break;
+      case 'HOME': mode = mode==='home'?'grid':'home'; break;
       case 'PLAY': break;                              // handled on release edge (toggle)
       case 'SELECT': selectTrack((selTrack+15)%16); break;
       default: break;                               // SAVE/FX/SCL/ENV/LFO: v1 unsignaled
@@ -1008,7 +1009,7 @@ function bindMidiHandlers(acc){
   }
 }
 
-let page=0, started=false;
+let started=false;
 function ensureAudio(){
   if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
   started=true;
