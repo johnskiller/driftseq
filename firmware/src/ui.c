@@ -17,6 +17,11 @@ static int8_t key_shift;                     /* OCT± keybed shift (±12) */
 static uint8_t glo_held;
 static uint8_t sel_track;
 
+/* forward decls (ui_screens.c defines the voices_sorted helper) */
+static void voices_sorted(uint8_t t, uint8_t s);
+static uint8_t sort_vs[4][3];
+static void edit_key_handler(uint8_t key, uint8_t down);
+
 static ds_track *TRK(void) { return &g.pat.track[sel_track]; }
 static uint8_t is_drum_trk(void) { return TRK()->channel == 9; }
 static uint8_t step_nv(uint8_t t, uint8_t s) { return g.pat.track[t].steps[s].nvoices; }
@@ -112,8 +117,7 @@ static uint8_t key_white_index(uint8_t key)        /* 0..15 = step-in-page */
  * EDIT layer: keys edit voices (batch 3) — no grid writes now. */
 static void panel_key_handler(uint8_t key, uint8_t down)
 {
-    if (ui_mode != M_GRID || focus_layer) {
-        /* live audition everywhere else (melodic math; drums map GM) */
+    if (ui_mode != M_GRID) {                          /* non-grid: live audition only */
         int note;
         if (is_drum_trk()) {
             uint8_t bi = key_black_ordinal(key);
@@ -125,6 +129,10 @@ static void panel_key_handler(uint8_t key, uint8_t down)
         }
         if (down) ds_live_on(&g, sel_track, (uint8_t)note, 100);
         else ds_live_off(&g, sel_track, (uint8_t)note);
+        return;
+    }
+    if (focus_layer) {                            /* EDIT layer: voice add/del (r16j rev.14a) */
+        edit_key_handler(key, down);
         return;
     }
     if (is_drum_trk()) {                          /* r16j drumKeyHandler: press edge only */
@@ -175,6 +183,58 @@ static void panel_key_handler(uint8_t key, uint8_t down)
         /* audition follows the key down/up either way */
         if (down) ds_live_on(&g, sel_track, (uint8_t)note, 100);
         else ds_live_off(&g, sel_track, (uint8_t)note);
+    }
+}
+
+/* EDIT layer keys (r16j editKeyHandler, rev.14a): cursor NEVER advances.
+ * Any key = that note on the cursor step: same note = delete the voice,
+ * else add (vel 100, gate 4); full step -> replace the highest note.
+ * Drums map through GM_DRUMS (black = lane note; white = KEY_WHITE ordinal). */
+static void edit_key_handler(uint8_t key, uint8_t down)
+{
+    ds_track *tr = TRK();
+    ds_step *st = &tr->steps[cursor];
+    int note;
+    if (is_drum_trk()) {
+        uint8_t bi = key_black_ordinal(key);
+        if (bi != 0xFF)
+            note = GM_DRUMS[bi];
+        else {
+            uint8_t wi = key_white_index(key);
+            if (wi >= 11u) wi = (uint8_t)(wi % 11u);      /* r16j: %GM_DRUMS.length */
+            note = GM_DRUMS[wi];
+        }
+    } else {
+        note = 53 + (int)key + key_shift;
+        if (note < 0) note = 0;
+        if (note > 127) note = 127;
+    }
+    if (down) {                                            /* hear + write */
+        uint8_t vi, hit = 0xFF;
+        ds_live_on(&g, sel_track, (uint8_t)note, 100);
+        for (vi = 0; vi < st->nvoices; vi++)
+            if (st->v[vi].note == note) hit = vi;
+        if (hit != 0xFF) {                                 /* same note = delete */
+            ds_voice_remove(tr, cursor, (uint8_t)note);
+            if (edit_voice >= st->nvoices && st->nvoices)
+                edit_voice = (uint8_t)(st->nvoices - 1);
+            return;
+        }
+        if (st->nvoices < 4) {
+            ds_voice_add(tr, cursor, (uint8_t)note, 100, 4);
+            edit_voice = (uint8_t)(st->nvoices - 1);       /* new voice active */
+        } else {                                           /* full: replace highest */
+            voices_sorted(sel_track, cursor);
+            ds_voice_remove(tr, cursor, sort_vs[3][0]);
+            ds_voice_add(tr, cursor, (uint8_t)note, 100, 4);
+            edit_voice = 3;
+        }
+        st->on = 1;
+    } else {
+        int off = 53 + (int)key + key_shift;
+        if (off < 0) off = 0;
+        if (off > 127) off = 127;
+        ds_live_off(&g, sel_track, (uint8_t)off);          /* drum offs dedup C-side */
     }
 }
 

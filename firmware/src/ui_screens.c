@@ -27,8 +27,9 @@ static uint16_t hue12(uint8_t note)
     return H12[note % 12u];
 }
 
-/* sorted voices of step s, pitch-ascending -> out[0..3] (note, vel, gate) */
-static uint8_t sort_vs[4][3];
+/* sorted voices of step s, pitch-ascending -> out[0..3] (note, vel, gate).
+ * sort_vs is DECLARED in ui.c (edit_key_handler consumes it before this
+ * definition appears in the unity include order). */
 static uint8_t sort_n;
 static void voices_sorted(uint8_t t, uint8_t s)
 {
@@ -189,6 +190,14 @@ static void draw_home(void)
     ui_draw_footer();
 }
 
+/* "EDIT" badge at the top-bar right corner — the loud layer flag (r16j has
+ * footer color only; John asked for a醒目标记). Yellow box, black text. */
+static void ui_draw_edit_badge(void)
+{
+    cv_rect(196, 2, 40, 12, YELLOW);
+    cv_text(201, 4, &FONT_T, "EDIT", C_BLACK);
+}
+
 /* ---- MELODY GRID (r16j drawGrid verbatim) ----
  * 4x24px rows (y16..112), cell bg = loop in/out (#2a2a33 / #16161c),
  * pitch line = hue12(note), rest = gray dashed, bare gate = bottom bar,
@@ -218,6 +227,8 @@ static void draw_grid_melodic(void)
     cv_text(150, 2, &FONT_T, txt_st(cursor + 1), tr->mute ? MUTE_GRAY : GREEN_OK);
     if (key_shift != 0)
         cv_text(120, 2, &FONT_T, key_shift > 0 ? "+" : "-", YELLOW);
+    if (focus_layer)
+        ui_draw_edit_badge();
     {
         const int x0 = 18, cw = 13, chh = 24;        /* r16j: x0=18, cw=(240-18-16)/16=13 */
         for (r = 0; r < 4; r++)
@@ -283,6 +294,8 @@ static void draw_grid_drum(void)
              txt_join("P", txt_join(txt_num(0, page + 1), "/4"))), TB_TX);
     cv_text(150, 2, &FONT_T, txt_join(txt_st(cursor + 1), GM_SHORT[drum_sel]),
             TRK()->mute ? MUTE_GRAY : GREEN_OK);
+    if (focus_layer)
+        ui_draw_edit_badge();
     for (li = 0; li < 11; li++) {
         int y = y0 + li * lh;
         uint8_t sel = (li == drum_sel);

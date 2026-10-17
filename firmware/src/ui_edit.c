@@ -18,9 +18,7 @@ static void ui_draw_edit_panel(void)
         if (r >= sort_n) {                           /* empty slot: plain dark */
             cv_rect(2, y + 1, 236, 23, RGB565(22, 22, 27));
             cv_text(8, y + 6, &FONT_XS, "--", RGB565(85, 85, 95));
-            continue;
-        }
-        {
+        } else {
             uint8_t note = sort_vs[r][0], vel = sort_vs[r][1], gate = sort_vs[r][2];
             uint8_t prob = st->prob;
             uint16_t hue = hue12(note);
@@ -46,6 +44,12 @@ static void ui_draw_edit_panel(void)
                 cv_text(xs[3], y + 5, &FONT_XS, txt_join("v", txt_num(0, vel)), tcol);
                 cv_text(xs[4], y + 5, &FONT_XS, txt_join("p", txt_num(0, prob)), tcol);
             }
+        }
+        if (active) {                                /* r16j: yellow card outline */
+            cv_rect(2, y, 236, 1, YELLOW);
+            cv_rect(2, y + 24, 236, 1, YELLOW);
+            cv_rect(2, y, 1, 25, YELLOW);
+            cv_rect(237, y, 1, 25, YELLOW);
         }
     }
     cv_blit(0, 112);

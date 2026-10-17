@@ -202,6 +202,16 @@ int main(void)
     CHECK(cursor == 21, "step entry advances cursor");
     panel_key_up(2);                        /* release auditions off, writes nothing */
     CHECK(TRK()->steps[20].v[0].note == 55, "key release keeps the written note");
+
+    /* 10c. EDIT layer keys: add voice, same-note deletes, cursor never moves */
+    focus_layer = 1;                        /* EDIT on */
+    cursor = 20;
+    panel_key_handler(4, 1);                /* key 4 = note 57 (A3) */
+    CHECK(TRK()->steps[20].nvoices == 2, "EDIT key adds a voice");
+    CHECK(cursor == 20, "EDIT keys never advance cursor");
+    panel_key_handler(4, 1);                /* same note again = delete */
+    CHECK(TRK()->steps[20].nvoices == 1, "EDIT same-note deletes the voice");
+    focus_layer = 0;
     sel_track = 0;
 
     /* 11. draw calls smoke (no crash, all four screens) */
