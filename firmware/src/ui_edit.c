@@ -8,12 +8,12 @@
 static void ui_draw_edit_panel(void)
 {
     ds_step *st = &TRK()->steps[cursor];
-    int y0 = 96, r;
+    int r;
     voices_sorted(sel_track, cursor);
-    cv_begin(240, 104, RGB565(16, 16, 21));
-    cv_rect(0, 0, 240, 1, RGB565(58, 58, 68));       /* separator */
+    cv_begin(240, 100, RGB565(16, 16, 21));          /* screen y112..212 (r16j) */
+    cv_rect(0, 0, 240, 1, RGB565(58, 58, 68));       /* separator at y112 */
     for (r = 0; r < 4; r++) {
-        int y = 16 + r * 25;
+        int y = r * 25;                              /* 4 x 25 = 100 exact */
         uint8_t active = focus_layer && r == edit_voice;
         if (r >= sort_n) {                           /* empty slot: plain dark */
             cv_rect(2, y + 1, 236, 23, RGB565(22, 22, 27));
@@ -48,7 +48,7 @@ static void ui_draw_edit_panel(void)
             }
         }
     }
-    cv_blit(0, y0);
+    cv_blit(0, 112);
 }
 
 /* ---- drum readout strip (r16e/r16j: 56px, text is the data) ---- */
