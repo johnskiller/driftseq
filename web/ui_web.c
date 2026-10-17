@@ -47,7 +47,9 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
     if (y + h > 240u) h = 240u - y;
     for (r = 0; r < h; r++)
         for (i = 0; i < w; i++)
-            fb[(y + r) * 240u + x + i] = px[r * w + i];   /* already byte-swapped */
+            /* cv_px is pre-swapped for the big-endian panel (real lcd.c sends
+             * it raw); the browser fb is host-order, so un-swap on the way in. */
+            fb[(y + r) * 240u + x + i] = swap16(px[r * w + i]);
     fb_dirty = 1;
 }
 
