@@ -3,7 +3,7 @@
  * the strip under the device is the MIDI-out monitor (same bytes WebMIDI sends).
  */
 'use strict';
-const BUILD='r16g 10-17';
+const BUILD='r16h 10-17';
 const TRACKS=16, STEPS=64, CH=240;
 let M=null, S=0, H8=null;
 let OFF={}, TK={}, ST={};
@@ -326,8 +326,8 @@ function drawDrumGrid(){
   const nL=GM_DRUMS.length, lh=13, x0=30, y0=16;               // 11 lanes x13 = 143px (r16e: lanes above card zone 160)
   const pos=i32(OFF.pos16+selTrack*4);
   ctx.font='8px monospace';
-  const GAP=2;                                                 // r16g: breathing room between cells
-  const cw=Math.floor((CH-x0)/16), chh=lh-GAP;                 // cell 13x11 inside a 13x13 pitch
+  const GAP=4;                                                 // r16h: smaller cells, wider gaps
+  const cw=Math.floor((CH-x0)/16), chh=lh-GAP;                 // cell 9x9 inside a 13x13 pitch
   for(let li=0;li<nL;li++){
     const y=y0+li*lh, sel=li===drumSel;
     ctx.fillStyle=sel?'#c9c9d4':'#6a6a76';
@@ -340,7 +340,7 @@ function drawDrumGrid(){
         if(H8[S+vBase+vi*4]===GM_DRUMS[li]){ on=true; anyVoice=true; }
       }
       const sOn=stepU8(selTrack,s,'on');                        // step gate (vs lane voice)
-      const cx=x0+c*cw+1, cyy=y+1;                              // r16g: cell inset 1px, GAP 2 between
+      const cx=x0+c*cw+GAP/2, cyy=y+GAP/2;                      // r16h: cell centered in pitch
       // r16f cell semantics (John): no note = HOLLOW square, note = SOLID —
       // solid dark off-cells at 0.35 alpha read as smears/lines on 240px.
       const isCur=s===cursor&&sel&&anyVoice;
@@ -349,27 +349,28 @@ function drawDrumGrid(){
       const gRaw=hitIdx>=0?H8[S+vBase+hitIdx*4+2]:4;
       const gFrac=gRaw===0xFF?1:Math.min(1,(gRaw/4)/8);
       ctx.globalAlpha=sel?1:0.35;
+      const cellW=cw-GAP, cellH=chh;
       if(on){                                                   // solid hit
         ctx.fillStyle=DPAL[li%DPAL.length];
-        ctx.fillRect(cx,cyy,cw-2,chh);
+        ctx.fillRect(cx,cyy,cellW,cellH);
         if(isCur&&gFrac<1){                                     // gate: bright span vs dim remainder
           ctx.globalAlpha=0.3; ctx.fillStyle='#000';
-          ctx.fillRect(cx+Math.max(1,(cw-2)*gFrac),cyy,(cw-2)*(1-gFrac),chh);
+          ctx.fillRect(cx+Math.max(1,cellW*gFrac),cyy,cellW*(1-gFrac),cellH);
           ctx.globalAlpha=sel?1:0.35;
         }
       } else {                                                  // hollow square
         ctx.globalAlpha=1;
         ctx.strokeStyle=sel?'#565664':'#2e2e3a'; ctx.lineWidth=1;  // outline itself carries dimness
-        ctx.strokeRect(cx+0.5,cyy+0.5,cw-3,chh-1);
-        if(sOn&&!anyVoice){                                     // bare gate: hollow + lane-color bottom bar
-          ctx.fillStyle=DPAL[li%DPAL.length]; ctx.globalAlpha=sel?0.55:0.3;
-          ctx.fillRect(cx+1,cyy+chh-3,cw-4,2);
+        ctx.strokeRect(cx+0.5,cyy+0.5,cellW-1,cellH-1);
+        if(sOn&&!anyVoice&&sel){                                // bare gate: sel lane only (r16h fix:
+          ctx.fillStyle=DPAL[li%DPAL.length]; ctx.globalAlpha=0.55;  // tick on every lane = column noise)
+          ctx.fillRect(cx+1,cyy+cellH-3,cellW-2,2);
           ctx.globalAlpha=sel?1:0.35;
         }
       }
       if(isCur){                                                // cursor hit: white outline
         ctx.globalAlpha=1; ctx.strokeStyle='#f0f0f6'; ctx.lineWidth=1;
-        ctx.strokeRect(cx+0.5,cyy+0.5,cw-3,chh-1);
+        ctx.strokeRect(cx+0.5,cyy+0.5,cellW-1,cellH-1);
       }
     }
     ctx.globalAlpha=1;
