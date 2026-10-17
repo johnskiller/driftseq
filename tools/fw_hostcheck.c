@@ -26,7 +26,9 @@ static uint32_t cv_w = 240, cv_h = 240; static int32_t cv_oy, cv_y0, cv_y1 = 240
 static void cv_begin(uint32_t w, uint32_t h, uint16_t bg){ uint32_t i; cv_w=w; cv_h=h; cv_oy=cv_y0=0; cv_y1=(int32_t)h; for(i=0;i<w*h;i++) cv_px[i]=bg; }
 static void cv_blit(uint32_t x, uint32_t y){ (void)x;(void)y; }
 static void cv_rect(int32_t x,int32_t y,int32_t w,int32_t h,uint16_t c){ (void)x;(void)y;(void)w;(void)h;(void)c; }
+static void cv_pset(int32_t x,int32_t y,uint16_t c){ (void)x;(void)y;(void)c; }
 static void cv_line(int32_t x0,int32_t y0,int32_t x1,int32_t y1,uint16_t c){ (void)x0;(void)y0;(void)x1;(void)y1;(void)c; }
+static void cv_disc(int32_t cx,int32_t cy,int32_t r,uint16_t c){ (void)cx;(void)cy;(void)r;(void)c; }
 static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char *s, uint16_t c){ (void)f;(void)c;(void)y; while(*s++)x+=6; return x; }
 static void lcd_fill(uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint16_t c){(void)x;(void)y;(void)w;(void)h;(void)c;}
 static void draw_text_box(uint32_t x,uint32_t y,uint32_t w,const felucca_font_t *f,const char *s,uint16_t c,int a){(void)x;(void)y;(void)w;(void)f;(void)s;(void)c;(void)a;}

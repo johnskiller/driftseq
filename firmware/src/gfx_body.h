@@ -11,6 +11,7 @@
 /* Small-canvas renderer (no full framebuffer). Draw text/lines into
  * an off-screen strip, then blit it in one DMA transfer. Pixels are stored
  * byte-swapped (the panel takes RGB565 big-endian). */
+#include <math.h>                    /* cv_disc */
 typedef struct {               /* proportional, see tools/gen_font.py */
     uint8_t h;
     uint8_t pad;               /* bitmap starts this many pixels left of the pen */
@@ -143,6 +144,16 @@ static void cv_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t c)
             err += dx;
             y0 += sy;
         }
+    }
+}
+
+/* filled disc, integer radius (ARP pulse dots) */
+static void cv_disc(int32_t cx, int32_t cy, int32_t r, uint16_t c)
+{
+    int32_t y;
+    for (y = -r; y <= r; y++) {
+        int32_t hw = (int32_t)(sqrt((double)r * r - (double)y * y) + 0.5);
+        cv_rect(cx - hw, cy + y, hw * 2 + 1, 1, c);
     }
 }
 

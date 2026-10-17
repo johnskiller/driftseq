@@ -14,7 +14,6 @@ static void ui_draw_footer(void);
 /* edit/readout/arp internals (ui_edit.c) */
 static void ui_draw_edit_panel(void);
 static void ui_draw_readout(void);
-static void ui_draw_ring_onto_main(void);
 static void ui_arp_encoder(uint8_t enc, int8_t det);
 static void ui_edit_encoder(uint8_t enc, int8_t det);
 static void ui_grid_encoder(uint8_t enc, int8_t det);
@@ -44,6 +43,16 @@ static void strcpy_(char *dst, const char *src);
 
 /* libc (Felucca libc.c) */
 static void fmt_int(char *b, int32_t v);
+
+/* gfx (gfx_body.h) */
+static void cv_pset(int32_t x, int32_t y, uint16_t c);
+static void cv_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c);
+static void cv_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t c);
+static void cv_disc(int32_t cx, int32_t cy, int32_t r, uint16_t c);
+static void cv_begin(uint32_t w, uint32_t h, uint16_t bg);
+static void cv_blit(uint32_t x, uint32_t y);
+static uint16_t blend(uint16_t fg, uint16_t bg, uint8_t a);
+static uint16_t hue12(uint8_t note);
 
 /* note name table (emu NAMES) */
 static const char *const NOTE_NAMES[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};

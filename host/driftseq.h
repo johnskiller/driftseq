@@ -126,6 +126,7 @@ int      ds_live_off(ds_state *s, uint8_t trk, uint8_t note);
 int      ds_voice_add(ds_track *t, uint32_t step, uint8_t note, uint8_t vel, uint8_t gate);
 int      ds_voice_remove(ds_track *t, uint32_t step, uint8_t note);
 void     ds_euclid_fill(ds_track *t);           /* (re)paint steps from eu meta, only 'on' bits */
+void     ds_bjorklund(int n, int k, uint8_t *out);  /* painter access (ARP ring/strip) */
 uint8_t  ds_step_active(const ds_track *t, uint32_t step);  /* inside window AND has voices */
 
 #endif

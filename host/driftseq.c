@@ -195,6 +195,8 @@ static void bjorklund(int n, int k, uint8_t *out) {
         for (i = 0; i < nb; i++) for (j = 0; j < blen[i]; j++) out[w++] = B[i][j];
     }
 }
+
+void ds_bjorklund(int n, int k, uint8_t *out) { bjorklund(n, k, out); }
 void ds_euclid_fill(ds_track *t) {
     uint8_t pat[64];
     int i, n = t->eu_n ? t->eu_n : 16, k = t->eu_k;

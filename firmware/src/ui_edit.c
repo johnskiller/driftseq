@@ -1,48 +1,57 @@
 /* ui_edit.c — EDIT panel (rev.12 embedded, melodic) + drum readout strip +
- * ARP page + encoder/button routing (part of ui.c unity section). */
+ * ARP page + encoder/button routing (part of ui.c unity section). Ported
+ * from web/emu.js r16j: drawEditPanel / drum readout / drawArp. */
 
-/* ---- melodic EDIT panel: 4 voice cards, whole-row param bars (rev.14c) ---- */
+/* ---- melodic EDIT panel: 4 voice cards (r16j drawEditPanel verbatim) ----
+ * card bg luminance = velocity, hue bar length = gate, 5-segment text
+ * v<sym> NOTE g<n> v<n> p<n> at fixed columns, 1px dark shadow under text. */
 static void ui_draw_edit_panel(void)
 {
-    ds_track *tr = TRK();
-    ds_step *st = &tr->steps[cursor];
-    int r;
-    /* 4 rows x 26px at y 112..216 (rev.12 budget: 16+96+104+24) */
+    ds_step *st = &TRK()->steps[cursor];
+    int y0 = 96, r;
+    voices_sorted(sel_track, cursor);
     cv_begin(240, 104, RGB565(16, 16, 21));
+    cv_rect(0, 0, 240, 1, RGB565(58, 58, 68));       /* separator */
     for (r = 0; r < 4; r++) {
-        int y = r * 26;
-        uint8_t active = (focus_layer && r == edit_voice);
-        cv_rect(0, y, 240, 25, active ? RGB565(42, 42, 51) : RGB565(22, 22, 27));
-        if (r < st->nvoices && st->v[r].note != 0xFF) {
-            char *line;
-            char nb[8];
-            uint16_t col = TRACK_HUE(st->v[r].note & 15);
-            int gspan = (st->v[r].gate == 0xFF) ? 240 : (st->v[r].gate * 240 / 32);
-            cv_rect(0, y, gspan, 25, col);
-            /* "v1 C3 g4 v100" */
-            line = txt_next();
-            line[0] = 'v'; line[1] = (char)('1' + r); line[2] = ' ';
-            strcpy_(nb, note_name(st->v[r].note));
-            strcpy_(line + 3, nb);
-            {   /* append " g<v> v<v>" via fmt_int */
-                char *w = line;
-                while (*w) w++;
-                *w++ = ' '; *w++ = 'g';
-                fmt_int(w, st->v[r].gate); while (*w) w++;
-                *w++ = ' '; *w++ = 'v';
-                fmt_int(w, st->v[r].vel);
+        int y = 16 + r * 25;
+        uint8_t active = focus_layer && r == edit_voice;
+        if (r >= sort_n) {                           /* empty slot: plain dark */
+            cv_rect(2, y + 1, 236, 23, RGB565(22, 22, 27));
+            cv_text(8, y + 6, &FONT_XS, "--", RGB565(85, 85, 95));
+            continue;
+        }
+        {
+            uint8_t note = sort_vs[r][0], vel = sort_vs[r][1], gate = sort_vs[r][2];
+            uint8_t prob = st->prob;
+            uint16_t hue = hue12(note);
+            uint16_t desat = blend(hue, RGB565(128, 128, 128), (uint8_t)(255 - prob * 255 / 100));
+            int gspan = (gate == 0xFF) ? 234 : (int)(((gate / 4.0) > 8.0 ? 8.0 : gate / 4.0) * 29);
+            /* whole-row bg = velocity luminance (18%..73% gray) */
+            cv_rect(3, y + 1, 234, 23, blend(RGB565(186, 186, 186), RGB565(46, 46, 46), (uint8_t)(255 - vel * 255 / 127)));
+            cv_rect(3, y + 1, gspan < 3 ? 3 : gspan, 23, desat);   /* bar = gate */
+            if (gate == 0xFF && g.playing)
+                cv_rect(234, y + 1, 3, 23, C_WHITE);
+            {   /* text: "v1" NOTE "g" GATE "v" VEL "p" PROB at fixed columns */
+                int xs[5] = {7, 34, 84, 140, 188};
+                uint16_t tcol = active ? WARMWHITE : BRIGHTTX;
+                char *seg = txt_next();
+                seg[0] = 'v';
+                seg[1] = (char)('1' + r);
+                seg[2] = ' ';
+                seg[3] = st->on ? (char)((g.playing && g.pos16[sel_track] == cursor) ? '>' : 'o') : '-';
+                seg[4] = 0;
+                cv_text(xs[0], y + 5, &FONT_XS, seg, tcol);
+                cv_text(xs[1], y + 5, &FONT_XS, note_name2(note), tcol);
+                cv_text(xs[2], y + 5, &FONT_XS, txt_join("g", gate_str(gate)), tcol);
+                cv_text(xs[3], y + 5, &FONT_XS, txt_join("v", txt_num(0, vel)), tcol);
+                cv_text(xs[4], y + 5, &FONT_XS, txt_join("p", txt_num(0, prob)), tcol);
             }
-            cv_text(6, y + 5, &FONT_XS, line, C_BLACK);
-            if (active)
-                cv_rect(0, y, 239, 1, RGB565(230, 200, 74));
-        } else {
-            cv_text(6, y + 5, &FONT_XS, "--", C_DIM);
         }
     }
-    cv_blit(0, 112);
+    cv_blit(0, y0);
 }
 
-/* ---- drum readout strip (r16e: 56px, text is the data) ---- */
+/* ---- drum readout strip (r16e/r16j: 56px, text is the data) ---- */
 static void ui_draw_readout(void)
 {
     ds_step *st = &TRK()->steps[cursor];
@@ -51,64 +60,151 @@ static void ui_draw_readout(void)
         if (st->v[vi].note == GM_DRUMS[drum_sel]) hit = vi;
     cv_begin(240, 56, RGB565(16, 16, 21));
     cv_rect(0, 0, 240, 1, RGB565(58, 58, 68));
-    cv_text(10, 10, &FONT_XS, txt_join(GM_SHORT[drum_sel], txt_st(cursor + 1)), D_PAL[drum_sel]);
+    cv_rect(2, 3, 236, 50, focus_layer ? RGB565(46, 46, 58) : RGB565(22, 22, 27));
+    if (focus_layer) {                               /* yellow outline when editing */
+        cv_rect(2, 3, 236, 1, YELLOW);
+        cv_rect(2, 52, 236, 1, YELLOW);
+        cv_rect(2, 3, 1, 50, YELLOW);
+        cv_rect(237, 3, 1, 50, YELLOW);
+    }
+    cv_text(10, 8, &FONT_XS, txt_join(GM_SHORT[drum_sel], txt_st(cursor + 1)), D_PAL[drum_sel]);
     if (hit >= 0)
-        cv_text(74, 10, &FONT_XS,
+        cv_text(70, 8, &FONT_XS,
                 txt_vgp(st->v[hit].vel,
                         st->v[hit].gate == 0xFF ? 0 : st->v[hit].gate,
-                        st->prob), RGB565(255, 244, 214));
+                        st->prob), WARMWHITE);
     else
-        cv_text(74, 10, &FONT_XS, "-- toggle: white key", RGB565(255, 244, 214));
+        cv_text(70, 8, &FONT_XS, "-- toggle: white key", WARMWHITE);
     cv_text(10, 34, &FONT_XS, "edit: VEL GAT PROB", RGB565(138, 138, 153));
     cv_blit(0, 160);
 }
 
-/* ---- ARP ring: n ticks clockwise from 12 o'clock, k pulses in track color ----
- * Integer polar via a 64-entry sine table (1796 ≈ 2π scale; cos = sin+16 quads). */
+/* ---- ARP (r16j drawArp verbatim): strip y16..28, ring center (120,112)
+ * r76, ticks/pulses on the circle, north pointer, numbers row y196..216. ---- */
 static const int16_t RING_SIN[64] = {0,175,349,519,684,843,995,1138,1271,1393,1503,1601,1686,1757,1815,1858,1886,1899,1897,1880,1847,1800,1739,1664,1576,1476,1364,1242,1111,972,826,673,516,355,192,27,-138,-305,-470,-632,-789,-941,-1086,-1223,-1352,-1471,-1580,-1677,-1762,-1833,-1889,-1929,-1954,-1962,-1954,-1930,-1889,-1833,-1762,-1677,-1580,-1471,-1352,-1223};
-static void ui_ring_polar(int a, int r, int cx, int cy, int *x, int *y)
+static void ring_pt(int i, int n, int rad, int cx, int cy, int *px, int *py)
 {
-    int sn = RING_SIN[a & 63], cs = RING_SIN[(a + 16) & 63];
-    *x = cx + sn * r / 1962;
-    *y = cy - cs * r / 1962;
+    int a = i * 64 / n;                              /* north = slot 0, clockwise */
+    *px = cx + RING_SIN[a & 63] * rad / 1962;
+    *py = cy - RING_SIN[(a + 16) & 63] * rad / 1962;
 }
+
 static void draw_arp(void)
 {
     ds_track *tr = TRK();
-    int i;
+    uint8_t eu = tr->eu_on, k0 = tr->eu_k, n0 = tr->eu_n;
+    int i, cx = 120, cy = 112, r = 76;
+    uint8_t pat[64];
+    uint8_t n, k, rot;
+    uint8_t start = tr->loop_start, len = tr->loop_len;
+    int pos = (int)g.pos16[sel_track];
+    uint8_t is_drum = (tr->channel == 9);
+    uint16_t tcol = TRACK_HUE(sel_track % 11);
+    int sx = 56, sw = 176, sy = 16, sh = 12;
+
     cv_begin(240, 224, C_BLACK);
-    cv_text(6, 2, &FONT_T, tr->eu_on ? "*LINK" : "FREE",
-            tr->eu_on ? RGB565(95, 224, 138) : RGB565(90, 90, 98));
-    /* result strip y16..28: what the loop plays (hero grammar) */
-    for (i = 0; i < 64; i++)
-        if (tr->steps[i].on)
-            cv_rect(30 + i * 3, 18, 2, 8, TRACK_HUE(sel_track % 11));
-    cv_rect(28 + (int)g.pos16[sel_track] * 3, 16, 1, 12, C_WHITE);
-    /* ring zone y28..196: one canvas pass, ring + numbers drawn into it */
-    ui_draw_ring_onto_main();
-    cv_text(4, 202, &FONT_XS, txt_knr(tr->eu_k, tr->eu_n, tr->eu_rot), C_AMB);
+    cv_rect(0, 0, 240, 16, TB_BG);
+    cv_text(6, 2, &FONT_T, txt_join("ARP TRK", txt_num(0, sel_track + 1)), TB_TX);
+    cv_text(192, 2, &FONT_T, eu ? "*LINK" : "FREE", eu ? GREEN_OK : RGB565(106, 106, 118));
+    if (!eu && k0 == 0 && n0 == 0) {                 /* fresh track: hint page */
+        cv_text(70, 112, &FONT_XS, "K4 - generate", RGB565(85, 85, 95));
+        cv_text(64, 202, &FONT_XS, "K -  N -  ROT -", RGB565(138, 138, 153));
+        cv_text(168, 202, &FONT_XS, "ARP v1.1", YELLOW);
+        cv_blit(0, 0);
+        ui_draw_footer();
+        return;
+    }
+    n = n0 ? n0 : 16;
+    k = k0 < n ? k0 : n;
+    rot = tr->eu_rot % n;
+    {   /* the pre-window pattern: engine's own math, recomputed for the ring */
+        ds_bjorklund(n, k, pat);
+    }
+    /* ---- 64-step result strip (hero row grammar) ---- */
+    cv_rect(0, sy, 240, sh, TB_BG);
+    cv_rect(sx, sy, sw, sh, RGB565(34, 34, 42));
+    for (i = 0; i < len; i++) {
+        int px = sx + (int)(((start + i) & 63) * sw) / 64;
+        cv_rect(px, sy, sw / 64 - 1, sh, RGB565(42, 42, 51));
+    }
+    for (i = 0; i < 64; i++) {
+        uint8_t rel = (uint8_t)((i + 64 - start) & 63);
+        uint8_t idx, on;
+        int px;
+        if (rel >= len) continue;
+        idx = (uint8_t)(((rel % n) + n - rot % n) % n);
+        if (!pat[idx]) continue;
+        on = tr->steps[i].on;
+        if (!on) continue;
+        px = sx + (int)(i * sw) / 64;
+        if (is_drum) {                               /* lane mini-lines */
+            uint8_t vi, mask = 0, li, row = 0;
+            int bw = sw / 64 - 1;
+            cv_rect(px, sy, bw, sh, blend(tcol, RGB565(24, 24, 32), 205));
+            for (vi = 0; vi < tr->steps[i].nvoices; vi++) {
+                uint8_t d;
+                for (d = 0; d < 11; d++)
+                    if (tr->steps[i].v[vi].note == GM_DRUMS[d]) mask |= (uint8_t)(1u << d);
+            }
+            for (li = 0; li < 9 && row < 4; li++) {
+                if (!(mask & (1u << li))) continue;
+                cv_rect(px, sy + 1 + row * 3, bw, 1, D_PAL[li % 11]);
+                row++;
+            }
+        } else {
+            cv_rect(px, sy, sw / 64 - 1, sh, tcol);
+        }
+    }
+    if (g.playing) {
+        int rel = (pos + 64 - start) & 63;
+        if (rel < (int)len)
+            cv_rect(sx + (int)(pos * sw) / 64, sy, 2, sh, C_WHITE);
+    }
+    cv_text(30, sy + 2, &FONT_T, "LOOP", RGB565(106, 106, 118));
+    /* ---- ring: outer guide, ticks, pulses (disc + white core), north pin ---- */
+    {
+        int a;
+        for (a = 0; a < 64; a++) {                   /* guide circle r+4 */
+            int gx = cx + RING_SIN[a & 63] * (r + 4) / 1962;
+            int gy = cy - RING_SIN[(a + 16) & 63] * (r + 4) / 1962;
+            cv_pset(gx, gy, RGB565(58, 58, 68));
+        }
+        for (i = 0; i < n; i++) {
+            int px2, py2;
+            uint8_t pulse = pat[(uint8_t)(((i % n) + n - (rot % n)) % n)];
+            ring_pt(i, n, r, cx, cy, &px2, &py2);
+            if (pulse) {                             /* drawn after ticks */
+                cv_disc(px2, py2, 3, tcol);
+                cv_disc(px2, py2, 1, blend(C_WHITE, C_BLACK, 38));
+            } else {
+                cv_rect(px2 - 1, py2 - 1, n > 32 ? 1 : 2, n > 32 ? 1 : 2,
+                        n > 32 ? RGB565(74, 74, 84) : RGB565(106, 106, 118));
+            }
+            if (i == 0) {                            /* north pointer */
+                int nx, ny;
+                ring_pt(0, n, r - 10, cx, cy, &nx, &ny);
+                cv_line(px2, py2, nx, ny, RGB565(138, 138, 153));
+            }
+        }
+    }
+    if (g.playing) {                                 /* playhead dot outside ring */
+        int rel = (pos + 64 - start) & 63;
+        if (rel < (int)len) {
+            int ph = rel % n, px, py;
+            int a = ph * 64 / n;
+            px = cx + RING_SIN[a & 63] * (r + 8) / 1962;
+            py = cy - RING_SIN[(a + 16) & 63] * (r + 8) / 1962;
+            cv_disc(px, py, 2, C_WHITE);
+        }
+    }
+    /* ---- numbers row ---- */
+    cv_rect(0, 196, 240, 20, TB_BG);
+    cv_text(10, 204, &FONT_T, txt_join("K", txt_num(0, k)), BRIGHTTX);
+    cv_text(64, 204, &FONT_T, txt_join("N", txt_num(0, n)), BRIGHTTX);
+    cv_text(118, 204, &FONT_T, txt_join("ROT", txt_num(0, rot)), BRIGHTTX);
+    cv_text(168, 204, &FONT_T, "ARP v1.1", YELLOW);
     cv_blit(0, 0);
     ui_draw_footer();
-}
-
-/* ring drawn directly at final coordinates (single-canvas pass) */
-static void ui_draw_ring_onto_main(void)
-{
-    ds_track *tr = TRK();
-    int i;
-    int cx = 119, cy = 112, r0 = 60, r1 = 68;
-    for (i = 0; i < tr->eu_n; i++) {
-        int x0, y0, x1, y1;
-        ui_ring_polar(i * 64 / tr->eu_n, r0, cx, cy, &x0, &y0);
-        ui_ring_polar(i * 64 / tr->eu_n, r1, cx, cy, &x1, &y1);
-        cv_line(x0, y0, x1, y1, i < tr->eu_k ? TRACK_HUE(sel_track % 11) : C_DIM);
-    }
-    {   /* playhead tick, white, just outside the ring */
-        int x0, y0, x1, y1;
-        ui_ring_polar((int)g.pos16[sel_track] * 64 / tr->eu_n, r0, cx, cy, &x0, &y0);
-        ui_ring_polar((int)g.pos16[sel_track] * 64 / tr->eu_n, r1 + 3, cx, cy, &x1, &y1);
-        cv_line(x0, y0, x1, y1, C_WHITE);
-    }
 }
 
 /* ---- per-page encoder behavior ---- */
@@ -244,9 +340,7 @@ static void ui_arp_encoder(uint8_t enc, int8_t det)
 
 /* ---- routing: encoders + buttons ----
  * Encoder ids here are the LOGICAL roles (plat_ctrl.h EN_*): EN_SELECT=0,
- * EN_ALGO=1, EN_PRESET=2, EN_K1..K4=3..6. The per-page handlers use
- * K1..K4 = 3..6 (emu panelEnc role numbers), so select-track is matched
- * explicitly and everything else passes through. */
+ * EN_ALGO=1, EN_PRESET=2, EN_K1..K4=3..6. */
 static void ui_encoder(uint8_t enc, int8_t det)
 {
     if (enc == EN_SELECT) {                      /* SELECT: track, no wrap */
@@ -300,7 +394,7 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
         break;
     case B_OCTUP:
         if (ui_mode == M_GRID && glo_held) {
-            /* GLO+OCT+ = rest/tie cycle — v1.1 (needs cond/tie semantics); no-op now */
+            /* GLO+OCT+ = rest/tie cycle — v1.1; no-op now */
         } else if (ui_mode == M_GRID && focus_layer) {
             if (cursor < 63) cursor++;             /* EDIT layer: cursor fwd (emu) */
         } else {

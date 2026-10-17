@@ -74,3 +74,17 @@ static char *txt_knr(uint8_t k, uint8_t n, uint8_t rot)
     fmt_int(txt_end(w), rot);
     return w;
 }
+
+/* number -> buffer (optionally after a prefix); fmt_int returns void so this
+ * wrapper makes inline use in cv_text() calls ergonomic */
+static char *txt_num(const char *prefix, int32_t v)
+{
+    char *b = txt_next();
+    if (prefix && *prefix) {
+        strcpy_(b, prefix);
+        fmt_int(txt_end(b), v);
+    } else {
+        fmt_int(b, v);
+    }
+    return b;
+}

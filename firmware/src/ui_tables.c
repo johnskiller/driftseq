@@ -10,3 +10,14 @@ static const uint16_t D_PAL[11] = {          /* drum lane identity colors (emu D
 static const uint8_t GM_DRUMS[11] = {36, 38, 42, 46, 49, 45, 41, 43, 51, 47, 39};
 static const char GM_SHORT[11][5] = {"KCK", "SNR", "CHH", "OHH", "CUP", "TOM", "RID", "PERC", "SHK", "CAB", "MAR"};
 #define TRACK_HUE(i) D_PAL[(i) % 11]
+
+/* alpha blend two RGB565 colors: out = fg*(255-a)/255 + bg*a/255
+ * (a=0 keeps fg, a=255 keeps bg — emu globalAlpha over bg) */
+static uint16_t blend(uint16_t fg, uint16_t bg, uint8_t a)
+{
+    uint32_t r1 = (fg >> 11) & 31u, g1 = (fg >> 5) & 63u, b1 = fg & 31u;
+    uint32_t r2 = (bg >> 11) & 31u, g2 = (bg >> 5) & 63u, b2 = bg & 31u;
+    return (uint16_t)(((r1 * (255u - a) + r2 * a) / 255u) << 11 |
+                      ((g1 * (255u - a) + g2 * a) / 255u) << 5 |
+                      ((b1 * (255u - a) + b2 * a) / 255u));
+}
