@@ -104,7 +104,7 @@ static void draw_arp(void)
     int pos = (int)g.pos16[sel_track];
     uint8_t is_drum = (tr->channel == 9);
     uint16_t tcol = TRACK_HUE(sel_track % 11);
-    int sx = 56, sw = 176, sy = 16, sh = 12;
+    int sx = 56, sw = 128, sy = 16, sh = 12;         /* rev.17: hero grammar = 64 x 2px = 128 */
 
     cv_begin(240, 224, C_BLACK);
     cv_rect(0, 0, 240, 16, TB_BG);
@@ -124,12 +124,12 @@ static void draw_arp(void)
     {   /* the pre-window pattern: engine's own math, recomputed for the ring */
         ds_bjorklund(n, k, pat);
     }
-    /* ---- 64-step result strip (hero row grammar) ---- */
+    /* ---- 64-step result strip (hero row grammar: 2px per step, no gap) ---- */
     cv_rect(0, sy, 240, sh, TB_BG);
     cv_rect(sx, sy, sw, sh, RGB565(34, 34, 42));
     for (i = 0; i < len; i++) {
-        int px = sx + (int)(((start + i) & 63) * sw) / 64;
-        cv_rect(px, sy, sw / 64 - 1, sh, RGB565(42, 42, 51));
+        int px = sx + (((start + i) & 63) * 2);
+        cv_rect(px, sy, 2, sh, RGB565(42, 42, 51));
     }
     for (i = 0; i < 64; i++) {
         uint8_t rel = (uint8_t)((i + 64 - start) & 63);
@@ -140,11 +140,10 @@ static void draw_arp(void)
         if (!pat[idx]) continue;
         on = tr->steps[i].on;
         if (!on) continue;
-        px = sx + (int)(i * sw) / 64;
+        px = sx + i * 2;
         if (is_drum) {                               /* lane mini-lines */
             uint8_t vi, mask = 0, li, row = 0;
-            int bw = sw / 64 - 1;
-            cv_rect(px, sy, bw, sh, blend(tcol, RGB565(24, 24, 32), 205));
+            cv_rect(px, sy, 2, sh, blend(tcol, RGB565(24, 24, 32), 205));
             for (vi = 0; vi < tr->steps[i].nvoices; vi++) {
                 uint8_t d;
                 for (d = 0; d < 11; d++)
@@ -152,17 +151,17 @@ static void draw_arp(void)
             }
             for (li = 0; li < 9 && row < 4; li++) {
                 if (!(mask & (1u << li))) continue;
-                cv_rect(px, sy + 1 + row * 3, bw, 1, D_PAL[li % 11]);
+                cv_rect(px, sy + 1 + row * 3, 2, 1, D_PAL[li % 11]);
                 row++;
             }
         } else {
-            cv_rect(px, sy, sw / 64 - 1, sh, tcol);
+            cv_rect(px, sy, 2, sh, tcol);
         }
     }
     if (g.playing) {
         int rel = (pos + 64 - start) & 63;
         if (rel < (int)len)
-            cv_rect(sx + (int)(pos * sw) / 64, sy, 2, sh, C_WHITE);
+            cv_rect(sx + pos * 2, sy, 2, sh, C_WHITE);
     }
     cv_text(30, sy + 2, &FONT_T, "LOOP", RGB565(106, 106, 118));
     /* ---- ring: outer guide, ticks, pulses (disc + white core), north pin ---- */

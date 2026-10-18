@@ -158,13 +158,17 @@ static void ui_draw_footer(void)
     cv_blit(0, 216);
 }
 
-/* ---- HOME hero (r16j drawHome verbatim geometry) ----
+/* ---- HOME hero (r16j drawHome geometry; rev.17 step width) ----
  * top bar 20px: TRK nn | PTN 01 | BPM ... right: S nn
  * 16 rows x 12px (y24..216): gutter TRK nn / LEN nn / route U / M,
- * window dim blocks (28% hue), drum = lane mini-lines, melodic = block,
- * prob<100 = 55%, selected track green outline, white playhead. */
+ * window band (15% hue), drum = lane mini-lines, melodic = block,
+ * prob<100 = 55%, selected track green outline, white playhead.
+ * rev.17 (John): each of the 64 steps is exactly 2px with NO gap —
+ * 64*2 = 128px bar (56..184). The old 176px bar gave 2.75px/step which
+ * integer-truncated to 1px blocks and read as noise on the real screen. */
 #define HX0 56
-#define HX1 232
+#define HSTEP 2
+#define HX1 (HX0 + 64 * HSTEP)                   /* 184 */
 static void draw_home(void)
 {
     uint8_t t;
@@ -199,22 +203,20 @@ static void draw_home(void)
         if (!muted) {
             uint8_t k;
             for (k = 0; k < tr->loop_len; k++) {
-                int px = HX0 + (int)(((tr->loop_start + k) & 63) * (HX1 - HX0)) / 64;
-                cv_rect(px, y, (HX1 - HX0) / 64 - 1, 11, blend(col, RGB565(29, 29, 38), 217));
+                int px = HX0 + (((tr->loop_start + k) & 63) * HSTEP);
+                cv_rect(px, y, HSTEP, 11, blend(col, RGB565(29, 29, 38), 217));
             }
             for (s = 0; s < 64; s++) {
                 ds_step *st = &tr->steps[s];
                 uint8_t vi;
-                int px, bw;
+                int px = HX0 + s * HSTEP;
                 if (!st->on || !st->nvoices)
                     continue;
                 if (((s + 64 - tr->loop_start) & 63) >= tr->loop_len)
                     continue;
-                px = HX0 + (int)(s * (HX1 - HX0)) / 64;
-                bw = (HX1 - HX0) / 64 - 1;
                 if (is_drum) {
                     /* rev.14e: 1px lane mini-lines, top->bottom, lane order */
-                    cv_rect(px, y, bw, 11, blend(col, RGB565(29, 29, 38), 205));
+                    cv_rect(px, y, HSTEP, 11, blend(col, RGB565(29, 29, 38), 205));
                     {
                         uint8_t mask = 0, li, row = 0;
                         for (vi = 0; vi < st->nvoices; vi++) {
@@ -225,21 +227,21 @@ static void draw_home(void)
                         for (li = 0; li < 9 && row < 4; li++) {
                             if (!(mask & (1u << li)))
                                 continue;
-                            cv_rect(px, y + 1 + row * 3, bw, 1, D_PAL[li % 11]);
+                            cv_rect(px, y + 1 + row * 3, HSTEP, 1, D_PAL[li % 11]);
                             row++;
                         }
                     }
                 } else {
                     /* melodic on-block: full track color; prob<100 = 55% (r16j globalAlpha 0.55)
                      * over the bar bg, i.e. bg weight 115 */
-                    cv_rect(px, y, bw, 11, st->prob < 100 ? blend(col, RGB565(29, 29, 38), 115) : col);
+                    cv_rect(px, y, HSTEP, 11, st->prob < 100 ? blend(col, RGB565(29, 29, 38), 115) : col);
                 }
             }
-            {   /* playhead (absolute, white, playing only) */
+            {   /* playhead (absolute, white, 2px = exactly one step, playing only) */
                 int pos = (int)g.pos16[t];
                 int rel = (pos + 64 - tr->loop_start) & 63;
                 if (rel < (int)tr->loop_len && g.playing)
-                    cv_rect(HX0 + (int)(pos * (HX1 - HX0)) / 64, y, 2, 11, C_WHITE);
+                    cv_rect(HX0 + pos * HSTEP, y, HSTEP, 11, C_WHITE);
             }
         }
         if (t == sel_track) {                        /* selected: green outline */
