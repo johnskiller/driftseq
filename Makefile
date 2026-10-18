@@ -1,7 +1,7 @@
 # DriftSeq — host tests + web/emu build
 #
 #   make test      — engine behavioral tests (plain C, no deps)
-#   make golden    — golden MIDI-stream hash (canonical 5828982717F322ED)
+#   make golden    — golden MIDI-stream hash (canonical 420C4824C85B79CB)
 #   make wasm      — build web/driftseq.js+wasm (engine bridge for wasmtest)
 #   make uiwasm    — build web/ui.js+wasm (FULL UI painters; batch 2 webemu)
 #   make wasmtest  — node parity check: wasm byte stream == host golden

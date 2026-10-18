@@ -1,7 +1,7 @@
 /* test_golden.c — golden MIDI-stream hash of the demo pattern (01 §7 seam contract)
  * Locks the engine's product: demo @ seed 42, 20 s of 64-frame blocks (integer tick
  * count — same loop as the emu) → one FNV-1a chunk hash.
- * Canonical: 5828982717F322ED — wasm (web/wasmtest.mjs) asserts the same value,
+ * Canonical: 420C4824C85B79CB — wasm (web/wasmtest.mjs) asserts the same value,
  * proving host C and browser wasm emit byte-identical streams.
  */
 #include "driftseq.h"

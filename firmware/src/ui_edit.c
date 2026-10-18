@@ -124,44 +124,64 @@ static void draw_arp(void)
     {   /* the pre-window pattern: engine's own math, recomputed for the ring */
         ds_bjorklund(n, k, pat);
     }
-    /* ---- 64-step result strip (hero grammar: 2px block + 1px gap = 3px pitch) ---- */
+    /* ---- 64-step result strip: same ABSOLUTE TIME axis as the hero (rev.19).
+     * 64 steps of a 1/16 track = 384 ticks = 192px = the whole bar span, so
+     * the strip lines up 1:1 with the HOME hero for the common case, and stays
+     * honest when the track uses a different division. ---- */
     cv_rect(0, sy, 240, sh, TB_BG);
     cv_rect(sx, sy, sw, sh, RGB565(34, 34, 42));
-    for (i = 0; i < len; i++) {                      /* window band: 2px, same gap as blocks */
-        int px = sx + (((start + i) & 63) * 3);
-        cv_rect(px, sy, 2, sh, RGB565(42, 42, 51));
-    }
-    for (i = 0; i < 64; i++) {
-        uint8_t rel = (uint8_t)((i + 64 - start) & 63);
-        uint8_t idx, on;
-        int px;
-        if (rel >= len) continue;
-        idx = (uint8_t)(((rel % n) + n - rot % n) % n);
-        if (!pat[idx]) continue;
-        on = tr->steps[i].on;
-        if (!on) continue;
-        px = sx + i * 3;
-        if (is_drum) {                               /* lane mini-lines */
-            uint8_t vi, mask = 0, li, row = 0;
-            cv_rect(px, sy, 2, sh, blend(tcol, RGB565(24, 24, 32), 205));
-            for (vi = 0; vi < tr->steps[i].nvoices; vi++) {
-                uint8_t d;
-                for (d = 0; d < 11; d++)
-                    if (tr->steps[i].v[vi].note == GM_DRUMS[d]) mask |= (uint8_t)(1u << d);
+    {   int ct = cell_ticks(tr->division);
+        int bw = step_w(ct);
+        int loop_ticks = (int)len * ct;
+        int npass = loop_ticks > 0 ? (sw * 2 + loop_ticks - 1) / loop_ticks : 1;
+        int pass;
+        for (pass = 0; pass < npass; pass++) {       /* loop passes + seam */
+            int x0 = sx + (pass * loop_ticks) / 2;
+            int xw = loop_ticks / 2;
+            if (x0 >= sx + sw) break;
+            if (x0 + xw > sx + sw) xw = sx + sw - x0;
+            cv_rect(x0, sy, xw, sh, RGB565(42, 42, 51));
+            if (pass && xw >= 8)
+                cv_rect(x0, sy, 1, sh, RGB565(56, 56, 68));
+        }
+        {   int k;                                    /* meter */
+            for (k = 0; k * 12 < sw; k++)
+                cv_rect(sx + k * 12, sy, 1, sh, (k & 3) ? RGB565(48, 48, 60) : RGB565(68, 68, 82));
+        }
+        for (pass = 0; pass < npass; pass++) {
+            int tbase = pass * loop_ticks;
+            if (tbase >= sw * 2) break;
+            for (i = 0; i < (int)len; i++) {
+                uint8_t idx, on;
+                int px;
+                idx = (uint8_t)(((i % n) + n - rot % n) % n);
+                if (!pat[idx]) continue;
+                on = tr->steps[(start + i) & 63].on;
+                if (!on) continue;
+                px = sx + (tbase + i * ct) / 2;
+                if (px >= sx + sw) break;
+                if (is_drum) {                       /* lane mini-lines */
+                    uint8_t vi, mask = 0, li, row = 0;
+                    cv_rect(px, sy, bw, sh, blend(tcol, RGB565(24, 24, 32), 205));
+                    for (vi = 0; vi < tr->steps[(start + i) & 63].nvoices; vi++) {
+                        uint8_t d;
+                        for (d = 0; d < 11; d++)
+                            if (tr->steps[(start + i) & 63].v[vi].note == GM_DRUMS[d]) mask |= (uint8_t)(1u << d);
+                    }
+                    for (li = 0; li < 9 && row < 4; li++) {
+                        if (!(mask & (1u << li))) continue;
+                        cv_rect(px, sy + 1 + row * 3, bw, 1, D_PAL[li % 11]);
+                        row++;
+                    }
+                } else {
+                    cv_rect(px, sy, bw, sh, tcol);
+                }
             }
-            for (li = 0; li < 9 && row < 4; li++) {
-                if (!(mask & (1u << li))) continue;
-                cv_rect(px, sy + 1 + row * 3, 2, 1, D_PAL[li % 11]);
-                row++;
-            }
-        } else {
-            cv_rect(px, sy, 2, sh, tcol);
         }
     }
-    if (g.playing) {
-        int rel = (pos + 64 - start) & 63;
-        if (rel < (int)len)
-            cv_rect(sx + pos * 3, sy, 2, sh, C_WHITE);
+    if (g.playing) {                                  /* global playhead on the same axis */
+        int ph = (int)g.tick_acc % (sw * 2);
+        cv_rect(sx + ph / 2, sy, 1, sh, C_WHITE);
     }
     cv_text(30, sy + 2, &FONT_T, "LOOP", RGB565(106, 106, 118));
     /* ---- ring: outer guide, ticks, pulses (disc + white core), north pin ---- */

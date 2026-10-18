@@ -158,23 +158,82 @@ static void ui_draw_footer(void)
     cv_blit(0, 216);
 }
 
-/* ---- HOME hero (r16j drawHome grammar; rev.18 = John's B) ----
- * top bar 20px: TRK nn | PTN 01 | BPM ... right: S nn
- * 16 rows x 12px (y24..216): gutter TRK nn / LEN nn / route U / M,
- * window band (15% hue), drum = lane mini-lines, melodic = block,
- * prob<100 = 55%, selected track green outline, white playhead.
+/* ---- HOME hero: ABSOLUTE TIME axis (rev.19, P = John's pick) ----
+ * top bar 20px: TRK nn | PTN 01 | BPM | DIV, right: S nn
+ * 16 rows x 12px (y24..216): gutter TRK nn / LEN nn / route U / M.
  *
- * rev.18 (John picked B): each step = 2px block + 1px gap = 3px pitch.
- * 64*3 = 192px, so the bar spans x47..238 (selected outline sits at 46
- * and 239). Gutter is 46px: TRK at 2 (ends 12), LEN at 15 (ends 25),
- * route at 28 (ends 34), M at 36 (ends 42).
- * The window band is ALSO 2px wide (not a continuous wash): if it filled
- * the gaps the 1px dark separation would only survive on melodic rows —
- * drum hit blocks are near-band-brightness and the grid would vanish. */
-#define HX0 47
-#define HSTEP 3
-#define HW 2                                       /* block width; HSTEP-HW = gap */
-#define HX1 (HX0 + 64 * HSTEP)                     /* 239 */
+ * WHY A TIME AXIS: divisions are per-track (01 §1), so a step-index axis
+ * silently assumes "all tracks have the same cell length" — a 12-step 1/8
+ * loop is twice as long as a 12-step 1/16 loop but drew the same width, so
+ * the phase drift on screen was a lie. The internal clock is 24 PPQ and all
+ * five divisions divide a quarter exactly (12 / 8 / 6 / 4 / 3 ticks), so
+ * there is an exact common grid: x = tick, 0.5px per tick.
+ *
+ *   4/4 bar = 16 sixteenths = 96 ticks = 48px;  beat = 24 ticks = 12px
+ *   span    = 4 bars = 384 ticks = 192px = x47..238
+ *   cell px = 6 / 4 / 3 / 2 / 1.5  for 1/8 1/8T 1/16 1/16T 1/32
+ *   block w = cell px - 1 gap, min 1px (John: 1/32 is always 1px)
+ *
+ * 1/16 keeps exactly the rev.18 look (3px pitch, 2px block, 1px gap).
+ *
+ * BACKGROUND carries both references John asked for:
+ *   loop  = 15% hue band per pass + a 40% hue seam at each pass restart
+ *           (seam suppressed when a pass is < 8px wide, else it is noise)
+ *   meter = bar lines (brighter) and beat lines (dimmer) over the band
+ *
+ * NOTES: melody rows draw the four voices as separate 1px lines (same slot
+ * grammar as the EDIT voice cards, so voice identity is stable) with the
+ * line length = that note's gate — a sustained note is literally a long
+ * line. Drum rows keep the 9-lane instrument mini-lines.
+ *
+ * ONE global playhead: every track shares the axis now, so a single white
+ * line sweeps the whole grid; drift reads as notes sliding against the bar
+ * lines instead of sixteen playheads drifting apart. */
+#define TPB      96                        /* ticks per 4/4 bar @24 PPQ */
+#define HXBARS   4
+#define HXSPAN   (TPB * HXBARS)            /* 384 ticks */
+#define HX0      47
+#define HX1      (HX0 + HXSPAN / 2)        /* 239 */
+
+/* cell length in 24-PPQ ticks — every division is an exact integer */
+static int cell_ticks(uint8_t div)
+{
+    switch (div) {
+    case DS_DIV_8:   return 12;
+    case DS_DIV_8T:  return 8;
+    case DS_DIV_16:  return 6;
+    case DS_DIV_16T: return 4;
+    case DS_DIV_32:  return 3;
+    default:         return 6;
+    }
+}
+static const char *div_str(uint8_t div)
+{
+    switch (div) {
+    case DS_DIV_8:   return "1/8";
+    case DS_DIV_8T:  return "1/8T";
+    case DS_DIV_16:  return "1/16";
+    case DS_DIV_16T: return "1/16T";
+    case DS_DIV_32:  return "1/32";
+    default:         return "1/16";
+    }
+}
+/* block width for a cell of ct ticks: cell px minus the 1px gap, min 1 */
+static int step_w(int ct) { int w = ct / 2 - 1; return w < 1 ? 1 : w; }
+
+/* distance (in steps) from s to the next step holding a voice, within the
+ * window; 0xFF gate means "hold until that event or the loop end" */
+static int next_event_run(uint8_t t, uint8_t s, uint8_t len, uint8_t start)
+{
+    ds_track *tr = &g.pat.track[t];
+    int rel = (int)((s + 64 - start) & 63), d;
+    for (d = 1; d < (int)len - rel; d++) {
+        ds_step *nx = &tr->steps[(start + rel + d) & 63];
+        if (nx->on && nx->nvoices)
+            return d;
+    }
+    return (int)len - rel;
+}
 static void draw_home(void)
 {
     uint8_t t;
@@ -185,6 +244,8 @@ static void draw_home(void)
         fmt_int(txt_end(b), sel_track + 1);
         strcpy_(txt_end(b), "-PTN 01-");
         fmt_int(txt_end(b), (int32_t)(g.bpm + 0.5));
+        strcpy_(txt_end(b), "-");
+        strcpy_(txt_end(b), div_str(TRK()->division));
         cv_text(6, 4, &FONT_T, b, TB_TX);
     }
     cv_text(204, 4, &FONT_T, txt_join("S", txt_num(0, TRK()->loop_start)),
@@ -195,6 +256,11 @@ static void draw_home(void)
         uint16_t col = TRACK_HUE(t);
         uint8_t muted = tr->mute;
         uint8_t is_drum = (tr->channel == 9);
+        int ct = cell_ticks(tr->division);       /* ticks per step (12/8/6/4/3) */
+        int loop_ticks = (int)tr->loop_len * ct; /* one full window pass */
+        int bw = step_w(ct);                     /* block width, 1px floor */
+        int npass = loop_ticks > 0 ? (HXSPAN + loop_ticks - 1) / loop_ticks : 1;
+        int pass;
         uint8_t s;
         /* gutter (46px): TRK nn | LEN nn | route | M */
         cv_text(2, y, &FONT_T, txt_num(0, t + 1), muted ? MUTE_GRAY : RGB565(154, 154, 168));
@@ -202,60 +268,108 @@ static void draw_home(void)
         cv_text(28, y, &FONT_T, "U", muted ? RGB565(74, 74, 82) : RGB565(122, 122, 136));
         if (muted)
             cv_text(36, y, &FONT_T, "M", RGB565(224, 160, 64));
-        /* window band: 15% track hue over the bar (spec img/home.svg opacity 0.15).
-         * blend()'s 3rd arg is the BACKGOUND weight: a=255 keeps bg, so 0.15 hue
-         * = a 217. On-blocks below carry the real track color at full alpha. */
         cv_rect(HX0, y, HX1 - HX0, 11, muted ? RGB565(20, 20, 24) : RGB565(29, 29, 38));
-        if (!muted) {
-            uint8_t k;
-            for (k = 0; k < tr->loop_len; k++) {     /* window band: 2px, same gap as blocks */
-                int px = HX0 + (((tr->loop_start + k) & 63) * HSTEP);
-                cv_rect(px, y, HW, 11, blend(col, RGB565(29, 29, 38), 217));
-            }
-            for (s = 0; s < 64; s++) {
-                ds_step *st = &tr->steps[s];
-                uint8_t vi;
-                int px = HX0 + s * HSTEP;
-                if (!st->on || !st->nvoices)
-                    continue;
-                if (((s + 64 - tr->loop_start) & 63) >= tr->loop_len)
-                    continue;
-                if (is_drum) {
-                    /* rev.14e: 1px lane mini-lines, top->bottom, lane order */
-                    cv_rect(px, y, HW, 11, blend(col, RGB565(29, 29, 38), 205));
-                    {
-                        uint8_t mask = 0, li, row = 0;
-                        for (vi = 0; vi < st->nvoices; vi++) {
-                            uint8_t d;
-                            for (d = 0; d < 11; d++)
-                                if (st->v[vi].note == GM_DRUMS[d]) mask |= (uint8_t)(1u << d);
-                        }
-                        for (li = 0; li < 9 && row < 4; li++) {
-                            if (!(mask & (1u << li)))
-                                continue;
-                            cv_rect(px, y + 1 + row * 3, HW, 1, D_PAL[li % 11]);
-                            row++;
-                        }
-                    }
-                } else {
-                    /* melodic on-block: full track color; prob<100 = 55% (r16j globalAlpha 0.55)
-                     * over the bar bg, i.e. bg weight 115 */
-                    cv_rect(px, y, HW, 11, st->prob < 100 ? blend(col, RGB565(29, 29, 38), 115) : col);
-                }
-            }
-            {   /* playhead (absolute, white, one block wide, playing only) */
-                int pos = (int)g.pos16[t];
-                int rel = (pos + 64 - tr->loop_start) & 63;
-                if (rel < (int)tr->loop_len && g.playing)
-                    cv_rect(HX0 + pos * HSTEP, y, HW, 11, C_WHITE);
+        if (muted) {
+            if (t == sel_track)
+                goto outline;
+            continue;
+        }
+        /* ---- background 1: loop passes (15% hue) + restart seam ----
+         * A pass shorter than 8px gets no seam: below that the seam is the
+         * same width as the band itself and reads as noise. */
+        for (pass = 0; pass < npass; pass++) {
+            int x0 = HX0 + (pass * loop_ticks) / 2;
+            int xw = loop_ticks / 2;
+            if (x0 >= HX1)
+                break;
+            if (x0 + xw > HX1)
+                xw = HX1 - x0;
+            cv_rect(x0, y, xw, 11, blend(col, RGB565(29, 29, 38), 217));
+            if (pass && xw >= 8)                     /* seam: 40% hue, 1px */
+                cv_rect(x0, y, 1, 11, blend(col, RGB565(29, 29, 38), 153));
+        }
+        /* ---- background 2: meter (beat 24 ticks = 12px, bar 96 = 48px) ----
+         * Global, identical on every row: this is the reference that makes
+         * "12-step 1/8 restarts mid-bar" readable at a glance. */
+        {   int k;
+            for (k = 0; k <= HXSPAN / 24; k++) {
+                int x = HX0 + k * 12;
+                if (x >= HX1)
+                    break;
+                cv_rect(x, y, 1, 11, (k & 3) ? RGB565(44, 44, 54) : RGB565(64, 64, 78));
             }
         }
+        /* ---- notes: one drawing pass per loop repetition ---- */
+        for (pass = 0; pass < npass; pass++) {
+            int tbase = pass * loop_ticks;
+            if (tbase >= HXSPAN)
+                break;
+            for (s = 0; s < tr->loop_len; s++) {
+                uint8_t si = (uint8_t)((tr->loop_start + s) & 63);
+                ds_step *st = &tr->steps[si];
+                int x = HX0 + (tbase + (int)s * ct) / 2;
+                int rel_end = (int)tr->loop_len - (int)s;   /* steps left in pass */
+                if (x >= HX1)
+                    break;
+                if (!st->on || !st->nvoices)
+                    continue;
+                if (is_drum) {
+                    /* rev.14e: 9-lane instrument mini-lines, top->bottom */
+                    uint8_t mask = 0, li, row = 0, vi;
+                    cv_rect(x, y, bw, 11, blend(col, RGB565(29, 29, 38), 205));
+                    for (vi = 0; vi < st->nvoices; vi++) {
+                        uint8_t d;
+                        for (d = 0; d < 11; d++)
+                            if (st->v[vi].note == GM_DRUMS[d]) mask |= (uint8_t)(1u << d);
+                    }
+                    for (li = 0; li < 9 && row < 4; li++) {
+                        if (!(mask & (1u << li)))
+                            continue;
+                        cv_rect(x, y + 1 + row * 3, bw, 1, D_PAL[li % 11]);
+                        row++;
+                    }
+                } else {
+                    /* melodic: four voices as four 1px lines, pitch-ascending
+                     * bottom->top, line color = hue12(note) (same pitch color
+                     * as the GRID). Line LENGTH = gate, so a sustained note is
+                     * literally a long line and staccato is a dot. */
+                    uint8_t vi;
+                    voices_sorted(t, si);
+                    for (vi = 0; vi < sort_n; vi++) {
+                        int gsteps, gpx, ly;
+                        uint8_t g = sort_vs[vi][2];
+                        uint16_t c = hue12(sort_vs[vi][0]);
+                        if (g == 0xFF)
+                            gsteps = next_event_run(t, si, tr->loop_len, tr->loop_start);
+                        else
+                            gsteps = g;
+                        if (gsteps > rel_end)          /* clamp at loop end */
+                            gsteps = rel_end;
+                        gpx = (gsteps * ct) / 2;
+                        if (gpx < 1)
+                            gpx = 1;
+                        if (x + gpx > HX1)
+                            gpx = HX1 - x;
+                        ly = y + 1 + (sort_n - 1 - vi) * 3;   /* high pitch on top */
+                        cv_rect(x, ly, gpx, 1,
+                                st->prob < 100 ? blend(c, RGB565(29, 29, 38), 115) : c);
+                    }
+                }
+            }
+        }
+outline:
         if (t == sel_track) {                        /* selected: green outline at 46 / 239 */
             cv_rect(HX0 - 1, y - 1, (HX1 - HX0) + 2, 1, RGB565(127, 217, 74));
             cv_rect(HX0 - 1, y + 11, (HX1 - HX0) + 2, 1, RGB565(127, 217, 74));
             cv_rect(HX0 - 1, y, 1, 11, RGB565(127, 217, 74));
             cv_rect(HX1, y, 1, 11, RGB565(127, 217, 74));
         }
+    }
+    /* ONE global playhead: every track shares this axis, so a single white
+     * line sweeps the grid and wraps once per 4-bar view. */
+    if (g.playing) {
+        int ph = (int)g.tick_acc % HXSPAN;
+        cv_rect(HX0 + ph / 2, 24, 1, 192, C_WHITE);
     }
     cv_blit(0, 0);
     ui_draw_footer();

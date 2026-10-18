@@ -9,6 +9,7 @@
 #define DS_VOICES   4
 #define DS_PATTERNS 16
 #define DS_CHAIN    64
+#define DS_GATES    64                          /* scheduled sequenced note-offs */
 
 enum { DS_ROUTE_USB = 0, DS_ROUTE_GM, DS_ROUTE_BOTH };
 enum { DS_DIV_8 = 0, DS_DIV_8T, DS_DIV_16, DS_DIV_16T, DS_DIV_32 };
@@ -84,6 +85,7 @@ typedef struct {
     uint8_t     pending[DS_TRACKS];     /* fire loop_start on next tick after play */
     uint8_t     pc_sent[DS_TRACKS];     /* program-change sent once per run */
     uint8_t     playing;
+    double      tick_acc;               /* absolute time in ticks @24 PPQ since play (hero axis) */
     uint8_t     sel_track;              /* UI-selected track (emu + panel SEL) */
     uint8_t     chain_cycle[DS_TRACKS]; /* completed window passes (for conditions) */
 
@@ -96,6 +98,12 @@ typedef struct {
     /* live keyboard (step-entry preview): small pool of held notes */
     struct { uint8_t trk, note; double t; } live[16];
     uint8_t     live_n;
+
+    /* scheduled note-offs for sequenced notes (gate). Lives in the state, not
+     * in a file-static, so two engines in one process cannot cross-talk
+     * (host tests run two states side by side). */
+    struct { uint8_t trk, note; double t; } gates[DS_GATES];
+    uint8_t     gates_n;
 } ds_state;
 
 /* rng */

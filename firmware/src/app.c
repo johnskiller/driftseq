@@ -92,7 +92,7 @@ static void fm1_fault(const fm1_crash_t *c)
 #include "../midi_io.c"
 #include "ctrl_glue.c"               /* ctrl_midi_in3 + transport hook */
 
-/* ---- engine: pure C, compiled unchanged (golden F907E068E55AA89E) ---- */
+/* ---- engine: pure C, compiled unchanged (golden 420C4824C85B79CB) ---- */
 #include "../host/driftseq.c"
 #include "../host/demo_pattern.c"
 

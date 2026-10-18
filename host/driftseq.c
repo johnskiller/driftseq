@@ -61,9 +61,12 @@ void ds_init(ds_state *s, uint64_t seed) {
 }
 
 /* ---------- transport ---------- */
+void ds_gates_reset(ds_state *s);
 void ds_play(ds_state *s) {
     int i;
     s->playing = 1;
+    s->tick_acc = 0.0;
+    ds_gates_reset(s);
     for (i = 0; i < DS_TRACKS; i++) {
         s->pc_sent[i] = 0;
         s->pos16[i] = s->pat.track[i].loop_start;  /* each track launches on its own start */
@@ -75,6 +78,7 @@ void ds_play(ds_state *s) {
 void ds_stop(ds_state *s) {
     int i;
     s->playing = 0;
+    s->gates_n = 0;                                  /* pending gate-offs die with the transport */
     s->out_len = 0;                                  /* stop's bytes are the whole message */
     for (i = 0; i < DS_TRACKS; i++) {               /* all notes off, part of the stream */
         s->out[s->out_len++] = 0xB0 | (s->pat.track[i].channel & 0x0F);
@@ -118,7 +122,50 @@ int ds_live_off(ds_state *s, uint8_t trk, uint8_t note) {
 }
 void ds_set_bpm(ds_state *s, double bpm) { if (bpm >= 20.0 && bpm <= 300.0) s->bpm = bpm; }
 
-/* ---------- editing ---------- */
+/* scheduled note-offs for SEQUENCED notes. Without this the `gate` field is
+ * dead data: land() only ever emitted note-on, so a played pattern hung every
+ * note until the next all-notes-off. Gate unit = steps of the track's own
+ * division (01 §2); 0xFF = hold until the next event in the window or the
+ * loop end, resolved at emit time so live edits take effect immediately. */
+typedef struct { uint8_t trk, note; double t; } ds_gate_ev;
+static double cell_seconds(double bpm, int div);   /* defined below */
+
+void ds_gates_reset(ds_state *s) { s->gates_n = 0; }
+static void gate_schedule(ds_state *s, const ds_track *t, uint8_t trk,
+                          const ds_note *n, double steps)
+{
+    double need;
+    if (s->gates_n >= DS_GATES)
+        return;
+    if (steps <= 0.0)
+        steps = 1.0;
+    need = steps * cell_seconds(s->bpm, t->division);
+    s->gates[s->gates_n].trk = trk;
+    s->gates[s->gates_n].note = n->note;
+    s->gates[s->gates_n].t = need;
+    s->gates_n++;
+}
+/* advance the pool, emitting 0x80 for every expired entry */
+static int gate_advance(ds_state *s, double dt)
+{
+    int i, fired = 0;
+    for (i = (int)s->gates_n - 1; i >= 0; i--) {
+        s->gates[i].t -= dt;
+        if (s->gates[i].t > 0.0)
+            continue;
+        if (s->out_len + 3 > sizeof s->out) {
+            s->gates[i].t = 0.0;                /* keep it: retry next tick */
+            continue;
+        }
+        s->out[s->out_len++] = 0x80 | (s->pat.track[s->gates[i].trk].channel & 0x0F);
+        s->out[s->out_len++] = s->gates[i].note & 0x7F;
+        s->out[s->out_len++] = 0;
+        s->gates[i] = s->gates[s->gates_n - 1];
+        s->gates_n--;
+        fired = 1;
+    }
+    return fired;
+}
 int ds_voice_add(ds_track *t, uint32_t step, uint8_t note, uint8_t vel, uint8_t gate) {
     ds_step *st = &t->steps[step & 63];
     int i;
@@ -262,8 +309,22 @@ static void land(ds_state *s, ds_track *t, int trk, uint32_t pos) {
         uint32_t r = ds_rng_next(&s->rng);
         if ((int)(r % 100u) < (int)st->prob) {
             int vi;
-            for (vi = 0; vi < st->nvoices; vi++)
+            for (vi = 0; vi < st->nvoices; vi++) {
                 emit_note(s, t, &st->v[vi]);
+                {   /* gate: steps of this division, 0xFF = until next event */
+                    double g = (double)st->v[vi].gate;
+                    if (st->v[vi].gate == 0xFF) {
+                        uint32_t rel = (pos + 64 - t->loop_start) & 63;
+                        uint32_t d;
+                        g = (double)(t->loop_len - rel);
+                        for (d = 1; d < (uint32_t)(t->loop_len - rel); d++) {
+                            ds_step *nx = &t->steps[(t->loop_start + rel + d) & 63];
+                            if (nx->on && nx->nvoices) { g = (double)d; break; }
+                        }
+                    }
+                    gate_schedule(s, t, (uint8_t)trk, &st->v[vi], g);
+                }
+            }
         }
     }
     if (st->cond == DS_C_FILL) s->fill_flag = 0;    /* one-shot consumed */
@@ -288,6 +349,11 @@ void ds_tick(ds_state *s, double dt_seconds) {
     }
     if (!s->playing) { if (!live_emitted) s->out_len = 0; return; }
     s->out_len = 0;
+    /* absolute time @24 PPQ — the hero's axis. 4/4 bar = 16 sixteenths = 96 ticks. */
+    s->tick_acc += dt_seconds * (s->bpm / 60.0) * 24.0;
+    /* sequenced note-offs first: a gate that expires this tick must land in
+     * the same byte stream as the note-on, or the note hangs. */
+    gate_advance(s, dt_seconds);
 
     for (trk = 0; trk < DS_TRACKS; trk++) {
         ds_track *t = &s->pat.track[trk];
