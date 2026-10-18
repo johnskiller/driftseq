@@ -104,7 +104,7 @@ static void draw_arp(void)
     int pos = (int)g.pos16[sel_track];
     uint8_t is_drum = (tr->channel == 9);
     uint16_t tcol = TRACK_HUE(sel_track % 11);
-    int sx = 56, sw = 128, sy = 16, sh = 12;         /* rev.17: hero grammar = 64 x 2px = 128 */
+    int sx = 47, sw = 192, sy = 16, sh = 12;         /* rev.18: hero grammar = 64 x 3px (2+1) = 192 */
 
     cv_begin(240, 224, C_BLACK);
     cv_rect(0, 0, 240, 16, TB_BG);
@@ -124,11 +124,11 @@ static void draw_arp(void)
     {   /* the pre-window pattern: engine's own math, recomputed for the ring */
         ds_bjorklund(n, k, pat);
     }
-    /* ---- 64-step result strip (hero row grammar: 2px per step, no gap) ---- */
+    /* ---- 64-step result strip (hero grammar: 2px block + 1px gap = 3px pitch) ---- */
     cv_rect(0, sy, 240, sh, TB_BG);
     cv_rect(sx, sy, sw, sh, RGB565(34, 34, 42));
-    for (i = 0; i < len; i++) {
-        int px = sx + (((start + i) & 63) * 2);
+    for (i = 0; i < len; i++) {                      /* window band: 2px, same gap as blocks */
+        int px = sx + (((start + i) & 63) * 3);
         cv_rect(px, sy, 2, sh, RGB565(42, 42, 51));
     }
     for (i = 0; i < 64; i++) {
@@ -140,7 +140,7 @@ static void draw_arp(void)
         if (!pat[idx]) continue;
         on = tr->steps[i].on;
         if (!on) continue;
-        px = sx + i * 2;
+        px = sx + i * 3;
         if (is_drum) {                               /* lane mini-lines */
             uint8_t vi, mask = 0, li, row = 0;
             cv_rect(px, sy, 2, sh, blend(tcol, RGB565(24, 24, 32), 205));
@@ -161,7 +161,7 @@ static void draw_arp(void)
     if (g.playing) {
         int rel = (pos + 64 - start) & 63;
         if (rel < (int)len)
-            cv_rect(sx + pos * 2, sy, 2, sh, C_WHITE);
+            cv_rect(sx + pos * 3, sy, 2, sh, C_WHITE);
     }
     cv_text(30, sy + 2, &FONT_T, "LOOP", RGB565(106, 106, 118));
     /* ---- ring: outer guide, ticks, pulses (disc + white core), north pin ---- */
