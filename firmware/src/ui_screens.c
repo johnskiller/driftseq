@@ -192,13 +192,15 @@ static void draw_home(void)
         cv_text(46, y, &FONT_T, "U", muted ? RGB565(74, 74, 82) : RGB565(122, 122, 136));
         if (muted)
             cv_text(46, y, &FONT_T, "M", RGB565(224, 160, 64));
-        /* window dim blocks (28% hue over the #1d1d26 bar) */
+        /* window band: 15% track hue over the bar (spec img/home.svg opacity 0.15).
+         * blend()'s 3rd arg is the BACKGOUND weight: a=255 keeps bg, so 0.15 hue
+         * = a 217. On-blocks below carry the real track color at full alpha. */
         cv_rect(HX0, y, HX1 - HX0, 11, muted ? RGB565(20, 20, 24) : RGB565(29, 29, 38));
         if (!muted) {
             uint8_t k;
             for (k = 0; k < tr->loop_len; k++) {
                 int px = HX0 + (int)(((tr->loop_start + k) & 63) * (HX1 - HX0)) / 64;
-                cv_rect(px, y, (HX1 - HX0) / 64 - 1, 11, blend(col, RGB565(29, 29, 38), 72));
+                cv_rect(px, y, (HX1 - HX0) / 64 - 1, 11, blend(col, RGB565(29, 29, 38), 217));
             }
             for (s = 0; s < 64; s++) {
                 ds_step *st = &tr->steps[s];
@@ -228,7 +230,9 @@ static void draw_home(void)
                         }
                     }
                 } else {
-                    cv_rect(px, y, bw, 11, st->prob < 100 ? blend(col, C_BLACK, 115) : col);
+                    /* melodic on-block: full track color; prob<100 = 55% (r16j globalAlpha 0.55)
+                     * over the bar bg, i.e. bg weight 115 */
+                    cv_rect(px, y, bw, 11, st->prob < 100 ? blend(col, RGB565(29, 29, 38), 115) : col);
                 }
             }
             {   /* playhead (absolute, white, playing only) */
