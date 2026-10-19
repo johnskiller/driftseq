@@ -3,6 +3,7 @@
 #define DRIFTSEQ_H
 
 #include <stdint.h>
+#include <stddef.h>          /* NULL — freestanding clang ships stddef.h */
 
 #define DS_TRACKS   16
 #define DS_STEPS    64
@@ -71,7 +72,16 @@ typedef struct {
 /* engine state (one editing pattern lives in RAM per 01 §2) */
 typedef struct {
     ds_pattern  pat;                    /* the live pattern */
+/* The 16-pattern bank is 323 KB — fine on the host and in the browser, but the
+ * FM-1 has 96 KiB of RAM, so the firmware build leaves it out (v1 keeps the
+ * live pattern + saved patterns in flash). Nothing reads it but ds_init's
+ * clearing loop, so the golden byte stream is identical either way. */
+#ifndef DS_PATTERN_BANK_IN_STATE
+#define DS_PATTERN_BANK_IN_STATE 1
+#endif
+#if DS_PATTERN_BANK_IN_STATE
     ds_pattern  flash[DS_PATTERNS];     /* all patterns (host: in RAM; FW: flash partition) */
+#endif
     ds_chain_entry chain[DS_CHAIN];
     uint8_t     chain_len;
 

@@ -1,0 +1,4 @@
+# firmware build products (tools/build.py)
+build/
+*.o
+*.elf

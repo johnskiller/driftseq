@@ -6,6 +6,8 @@
 #   make uiwasm    — build web/ui.js+wasm (FULL UI painters; batch 2 webemu)
 #   make wasmtest  — node parity check: wasm byte stream == host golden
 #   make fwcheck   — host compile + behavior check of the FM-1 app layer
+#   make fwbuild   — REAL pi32v2 firmware: compile+link+image checks
+#   make uiprobe   — pixel assertions on the real painters (needs uiwasm)
 #   make gh-pages  — refresh the gh-pages worktree from web/ (push manually)
 
 CC      ?= cc
@@ -14,7 +16,7 @@ EMCC    ?= emcc
 
 HOST_SRC = host/driftseq.c host/demo_pattern.c
 
-.PHONY: all test golden wasm uiwasm wasmtest fwcheck gh-pages clean
+.PHONY: all test golden wasm uiwasm wasmtest fwcheck fwbuild check uiprobe gh-pages clean
 
 all: test golden
 
@@ -48,6 +50,21 @@ wasmtest: wasm
 
 fwcheck:
 	python3 tools/fw_check.py
+
+# the real thing: pi32v2 cross build + entry/ram_text/image checks. Needs the
+# JieLi toolchain (JIELI_TOOLCHAIN=...). This target exists because the fw
+# build silently rotted while only fwcheck/uiprobe were run.
+fwbuild:
+	JIELI_TOOLCHAIN=$(JIELI_TOOLCHAIN) python3 tools/build.py --check
+
+# everything that must be green before a push
+check: test golden fwcheck fwbuild uiprobe
+
+# pixel-level contracts the hostcheck cannot see (it stubs cv_rect out):
+# meter spacing per zoom, the ARP strip sharing the hero axis, which page owns
+# the zoom wheel. Needs the wasm build, hence uiwasm first.
+uiprobe: uiwasm
+	node tools/ui_probe.js
 
 gh-pages:
 	git worktree add -f /tmp/ds-pages gh-pages 2>/dev/null || git worktree add /tmp/ds-pages gh-pages

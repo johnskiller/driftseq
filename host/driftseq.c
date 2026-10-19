@@ -15,7 +15,14 @@
  *    the new window snaps to the new start, notes are never hard-cut.
  */
 #include "driftseq.h"
+/* The firmware unity root includes src/libc.c (a freestanding libc with no
+ * header) BEFORE this file, and pi32v2 has no libc headers at all. Every other
+ * build (host tests, wasm, hostcheck) has a real string.h. */
+#ifdef DRIFTSEQ_FW
+void *memset(void *d, int c, unsigned n);
+#else
 #include <string.h>
+#endif
 
 /* ---------- rng (xorshift64) ---------- */
 void ds_rng_seed(ds_rng *r, uint64_t seed) { r->state = seed ? seed : 0x9E3779B97F4A7C15ull; }
@@ -54,7 +61,11 @@ void ds_init(ds_state *s, uint64_t seed) {
     int i;
     memset(s, 0, sizeof *s);
     ds_clear_pattern(&s->pat);
+#if DS_PATTERN_BANK_IN_STATE
     for (i = 0; i < DS_PATTERNS; i++) ds_clear_pattern(&s->flash[i]);
+#else
+    (void)i;
+#endif
     s->bpm = 120.0;
     s->global_swing = 0;
     ds_rng_seed(&s->rng, seed);

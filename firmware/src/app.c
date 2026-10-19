@@ -4,8 +4,8 @@
  * ONE compilation unit, Felucca/x0x layout (ctrl.c is the template): platform
  * sources #included in strict order; statics stay file-local. Include order:
  *   HAL headers → libc/lcd/gfx → usb/ota (+ glue shims) → panel →
- *   input (keyscan/encoders/leds/midi_io/ctrl_glue) → engine (host/*.c,
- *   unchanged, golden-pinned) → ui.c (screens) → app_main.c (boot + loop).
+ *   input (keyscan/encoders/leds/midi_io/ctrl_glue), the engine in host/,
+ *   unchanged and golden-pinned, then ui.c (screens), app_main.c (boot + loop).
  */
 #include <stdint.h>
 #include "fm1_time.h"
@@ -17,6 +17,7 @@
 #include "fm1_lcd_hw.h"
 #include "fm1_flash.h"
 #include "fm1_perf.h"
+#include "fm1_cpu1.h"            /* fm1_cpu1_halt() — dual-core bring-up (crt0 step) */
 
 #include "libc.c"
 #include "lcd.c"
@@ -25,8 +26,13 @@
 static volatile uint32_t fm1_ms;
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
 
-#include "usb.c"
+/* FELUCCA_OTA must be set BEFORE usb.c: that file guards the SysEx frame
+ * plumbing (ota_wire_send / ota_frame_get / ota_frame_done, used by ota.c and
+ * by the map SysEx path) with #if FELUCCA_OTA. Setting it after the include
+ * left those three as declarations only — the link failed with
+ * "internal linkage but is not defined". */
 #define FELUCCA_OTA 1
+#include "usb.c"
 #ifndef FELUCCA_ID
 #define FELUCCA_ID "FM-1_91001"          /* DriftSeq identity (plan b42a5eb: avoids
                                           * Polly FM-1_3\d{6} / sloop _900 / bubba _003) */
@@ -89,15 +95,22 @@ static void fm1_fault(const fm1_crash_t *c)
 #include "../keyscan.c"
 #include "../encoders.c"
 #include "../leds.c"
+#include "../map.c"                  /* DriftSeq map: values ARE the map (map.h) */
 #include "../midi_io.c"
 #include "ctrl_glue.c"               /* ctrl_midi_in3 + transport hook */
 
-/* ---- engine: pure C, compiled unchanged (golden 420C4824C85B79CB) ---- */
+/* ---- engine: pure C, compiled unchanged (golden 420C4824C85B79CB) ----
+ * g is the single engine instance: on web it lives in ui_web.c, on hardware
+ * here (the unity root owns it, like fm1-ctrl's ctrl.c owns its globals). */
+#include "../host/driftseq.h"
+ds_state g;
 #include "../host/driftseq.c"
 #include "../host/demo_pattern.c"
 
 /* ---- app: screens + boot + main loop ---- */
+#define DS_WEB_PANEL_SHIM 1          /* panel.c above already defines `panel` */
 #include "ui_glue.c"                 /* forward decls first (order independence) */
+#include "ui_tables.c"               /* GM_DRUMS / GM_SHORT (web root includes it too) */
 #include "ui_text.c"
 #include "ui.c"
 #include "ui_input.c"

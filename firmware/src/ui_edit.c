@@ -109,6 +109,9 @@ static void draw_arp(void)
     cv_begin(240, 224, C_BLACK);
     cv_rect(0, 0, 240, 16, TB_BG);
     cv_text(6, 2, &FONT_T, txt_join("ARP TRK", txt_num(0, sel_track + 1)), TB_TX);
+    /* zoom, same readout grammar as HOME: the strip below is the same time
+     * axis, so its scale must be readable here too (rev.21). */
+    cv_text(112, 2, &FONT_T, txt_join("x", txt_num(0, hero_bars)), RGB565(122, 122, 136));
     cv_text(192, 2, &FONT_T, eu ? "*LINK" : "FREE", eu ? GREEN_OK : RGB565(106, 106, 118));
     if (!eu && k0 == 0 && n0 == 0) {                 /* fresh track: hint page */
         cv_text(70, 112, &FONT_XS, "K4 - generate", RGB565(85, 85, 95));
@@ -124,33 +127,47 @@ static void draw_arp(void)
     {   /* the pre-window pattern: engine's own math, recomputed for the ring */
         ds_bjorklund(n, k, pat);
     }
-    /* ---- 64-step result strip: same ABSOLUTE TIME axis as the hero (rev.19).
-     * 64 steps of a 1/16 track = 384 ticks = 192px = the whole bar span, so
-     * the strip lines up 1:1 with the HOME hero for the common case, and stays
-     * honest when the track uses a different division. ---- */
+    /* ---- 64-step result strip: same ABSOLUTE TIME axis as the hero (rev.19),
+     * same zoom (rev.21). 64 steps of a 1/16 track = 384 ticks = the whole
+     * 192px span at x4, so the strip lines up 1:1 with the HOME hero; at other
+     * zooms it must follow tx() or the two views silently disagree about
+     * where the bar lines are. ---- */
     cv_rect(0, sy, 240, sh, TB_BG);
     cv_rect(sx, sy, sw, sh, RGB565(34, 34, 42));
     {   int ct = cell_ticks(tr->division);
         int bw = step_w(ct);
         int loop_ticks = (int)len * ct;
-        int npass = loop_ticks > 0 ? (sw * 2 + loop_ticks - 1) / loop_ticks : 1;
+        int npass = loop_ticks > 0 ? (hxspan() + loop_ticks - 1) / loop_ticks : 1;
         int pass;
         for (pass = 0; pass < npass; pass++) {       /* loop passes + seam */
-            int x0 = sx + (pass * loop_ticks) / 2;
-            int xw = loop_ticks / 2;
+            int x0 = sx + tx(pass * loop_ticks);
+            int xw = tx(loop_ticks);
             if (x0 >= sx + sw) break;
             if (x0 + xw > sx + sw) xw = sx + sw - x0;
             cv_rect(x0, sy, xw, sh, RGB565(42, 42, 51));
             if (pass && xw >= 8)
                 cv_rect(x0, sy, 1, sh, RGB565(56, 56, 68));
         }
-        {   int k;                                    /* meter */
-            for (k = 0; k * 12 < sw; k++)
-                cv_rect(sx + k * 12, sy, 1, sh, (k & 3) ? RGB565(48, 48, 60) : RGB565(68, 68, 82));
+        {   int k, bx = tx(24);                      /* meter, zoom-aware */
+            int beats_per_bar = TPB / 24;
+            if (bx >= 8) {
+                for (k = 0; k <= hxspan() / 24; k++) {
+                    int x = sx + tx(k * 24);
+                    if (x >= sx + sw) break;
+                    cv_rect(x, sy, 1, sh,
+                            (k % beats_per_bar) ? RGB565(48, 48, 60) : RGB565(68, 68, 82));
+                }
+            } else {
+                for (k = 0; k < (int)hero_bars; k++) {
+                    int x = sx + tx(k * TPB);
+                    if (x >= sx + sw) break;
+                    cv_rect(x, sy, 1, sh, RGB565(68, 68, 82));
+                }
+            }
         }
         for (pass = 0; pass < npass; pass++) {
             int tbase = pass * loop_ticks;
-            if (tbase >= sw * 2) break;
+            if (tbase >= hxspan()) break;
             for (i = 0; i < (int)len; i++) {
                 uint8_t idx, on;
                 int px;
@@ -158,7 +175,7 @@ static void draw_arp(void)
                 if (!pat[idx]) continue;
                 on = tr->steps[(start + i) & 63].on;
                 if (!on) continue;
-                px = sx + (tbase + i * ct) / 2;
+                px = sx + tx(tbase + i * ct);
                 if (px >= sx + sw) break;
                 if (is_drum) {                       /* lane mini-lines */
                     uint8_t vi, mask = 0, li, row = 0;
@@ -180,8 +197,8 @@ static void draw_arp(void)
         }
     }
     if (g.playing) {                                  /* global playhead on the same axis */
-        int ph = (int)g.tick_acc % (sw * 2);
-        cv_rect(sx + ph / 2, sy, 1, sh, C_WHITE);
+        int ph = (int)g.tick_acc % hxspan();
+        cv_rect(sx + tx(ph), sy, 1, sh, C_WHITE);
     }
     cv_text(30, sy + 2, &FONT_T, "LOOP", RGB565(106, 106, 118));
     /* ---- ring: outer guide, ticks, pulses (disc + white core), north pin ---- */
@@ -230,10 +247,28 @@ static void draw_arp(void)
     ui_draw_footer();
 }
 
+/* ---- GLO+K2 = hero zoom (rev.20; rev.21 makes it page-independent).
+ * Zoom is a DISPLAY state, not a per-page parameter: the hero and the ARP
+ * strip are two views of the same time axis, so the wheel must work wherever
+ * one of them is on screen. Before rev.21 this lived only in ui_grid_encoder
+ * — the one page that does not draw the hero — so the HOME screen, where the
+ * `x4` readout sits, could not move it. */
+static void zoom_encoder(int8_t det)
+{
+    int b = (int)hero_bars;
+    if (det > 0) b = (b == 1) ? 2 : (b == 2) ? 4 : 8;
+    else         b = (b == 8) ? 4 : (b == 4) ? 2 : 1;
+    hero_bars = (uint8_t)b;
+}
+
 /* ---- per-page encoder behavior ---- */
 static void ui_home_encoder(uint8_t enc, int8_t det)
 {
     ds_track *tr = TRK();
+    if (enc == EN_K2 && glo_held) {              /* GLO+K2 = hero zoom (rev.20/21) */
+        zoom_encoder(det);
+        return;
+    }
     if (enc == EN_K1) {                          /* K1 LOOP START (dead-stop) */
         int v = tr->loop_start + det;
         if (v < 0) v = 0;
@@ -256,11 +291,8 @@ static void ui_home_encoder(uint8_t enc, int8_t det)
 
 static void ui_grid_encoder(uint8_t enc, int8_t det)
 {
-    if (enc == EN_K2 && glo_held) {              /* GLO+K2 = hero zoom (rev.20) */
-        int b = (int)hero_bars;
-        if (det > 0) b = (b == 1) ? 2 : (b == 2) ? 4 : 8;
-        else         b = (b == 8) ? 4 : (b == 4) ? 2 : 1;
-        hero_bars = (uint8_t)b;
+    if (enc == EN_K2 && glo_held) {              /* GLO+K2 = hero zoom (rev.20/21) */
+        zoom_encoder(det);
         return;
     }
     if (enc == EN_K1) cursor_move(det);          /* K1 cursor (GLO+K1 x16) */
@@ -329,6 +361,10 @@ static void ui_edit_encoder(uint8_t enc, int8_t det)
 static void ui_arp_encoder(uint8_t enc, int8_t det)
 {
     ds_track *tr = TRK();
+    if (enc == EN_K2 && glo_held) {              /* GLO+K2 = zoom (strip is the hero axis) */
+        zoom_encoder(det);
+        return;
+    }
     if (enc == EN_K4) {                          /* K4 LINK */
         if (det > 0) {
             uint8_t k = tr->eu_k ? tr->eu_k : 4, n = tr->eu_n ? tr->eu_n : 16;

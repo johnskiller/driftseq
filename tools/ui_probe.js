@@ -1,0 +1,163 @@
+/* tools/ui_probe.js — pixel-level assertions on the REAL painters.
+ *
+ * The hostcheck (tools/fw_check.py) compiles the app layer against cv_rect
+ * stubs, so it proves routing but cannot see a single pixel. Everything that
+ * is actually a drawing contract — bar spacing per zoom, the strip following
+ * the hero's axis, which page owns the zoom wheel — has to be measured on the
+ * wasm build instead. Those probes used to live in /tmp and were lost every
+ * session; this file is the durable version.
+ *
+ *   make uiprobe        (builds web/ui.js first, then runs this)
+ *   node tools/ui_probe.js
+ *
+ * Reads pixel colours out of the 240x240 RGB565 fb. The colour constants
+ * below mirror ui_screens.c; if a painter's colours change, update them here
+ * deliberately — a silent mismatch would make an assertion vacuous.
+ */
+'use strict';
+const path = require('path');
+const WEB = path.join(__dirname, '..', 'web');
+const createMod = require(path.join(WEB, 'ui.js'));
+
+/* panel logical ids (firmware/src/plat_ctrl.h B_* / EN_*) */
+const B_FX = 0, B_SEL = 1, B_ENV = 2, B_LFO = 3, B_EDIT = 4, B_GLO = 5,
+      B_HOME = 6, B_SAVE = 7, B_ARP = 8, B_SEQ = 9, B_PLAY = 10, B_REC = 11,
+      B_OCTDN = 12, B_OCTUP = 13;
+const EN_SELECT = 0, EN_ALGO = 1, EN_PRESET = 2, EN_K1 = 3, EN_K2 = 4,
+      EN_K3 = 5, EN_K4 = 6;
+
+/* painter colours (ui_screens.c) */
+const BAR_LINE = '64,64,72';        /* meter: bar line   RGB565(64,64,78) */
+const BEAT_LINE = '40,44,48';       /* meter: beat line  RGB565(44,44,54) */
+
+let fails = 0;
+function check(cond, msg, detail) {
+    if (cond) console.log('ok: ' + msg);
+    else { console.log('FAIL: ' + msg + (detail ? '  [' + detail + ']' : '')); fails++; }
+}
+
+createMod().then((M) => {
+    const fb0 = () => M.HEAPU8.slice(M._ds_web_fb(), M._ds_web_fb() + 240 * 240 * 2);
+    const px = (fb, x, y) => {
+        const v = fb[(y * 240 + x) * 2] | (fb[(y * 240 + x) * 2 + 1] << 8);
+        return ((v >> 11) & 31) * 8 + ',' + (((v >> 5) & 63) * 4) + ',' + ((v & 31) * 8);
+    };
+    const frame = () => { M._ds_ui_frame(0.016); return fb0(); };
+    const hit = (c) => (c === BAR_LINE ? 'bar' : c === BEAT_LINE ? 'beat' : '');
+    /* x positions of meter lines at row y inside the bar area */
+    const meter = (fb, y) => {
+        const bar = [], beat = [];
+        for (let x = 47; x < 239; x++) {
+            const h = hit(px(fb, x, y));
+            if (h === 'bar') bar.push(x); else if (h === 'beat') beat.push(x);
+        }
+        return { bar, beat, barSp: bar.length > 1 ? bar[1] - bar[0] : 0,
+                 beatSp: beat.length > 1 ? beat[1] - beat[0] : 0 };
+    };
+    const btn = (b) => { M._ds_web_btn(b, 1); M._ds_web_btn(b, 0); };
+    /* HOME is a TOGGLE (ui_button: HOME <-> GRID), so "press HOME" is not
+     * "go to HOME". Always land via GRID, which is idempotent. */
+    const toHome = () => { btn(B_SEQ); btn(B_HOME); };
+    const toGrid = () => { btn(B_SEQ); };
+    /* GLO+K2 is a dead-stop 4-detent ladder: go to x1 then step up. */
+    const setZoom = (z) => {
+        M._ds_web_btn(B_GLO, 1);
+        for (let i = 0; i < 3; i++) M._ds_web_enc(EN_K2, -1);
+        for (let i = 0; i < Math.log2(z); i++) M._ds_web_enc(EN_K2, 1);
+        M._ds_web_btn(B_GLO, 0);
+        M._ds_ui_frame(0.016);
+    };
+
+    M._ds_ui_boot();
+    M._ds_ui_frame(0.016);
+
+    /* ---- 1. HOME hero meter spacing across the four zoom levels ----
+     * bar area is always 192px; zoom changes ticks per pixel, so the bar
+     * spacing must be 192/96/48/24 — measured, not assumed. At x1 one bar
+     * exactly fills the area, so there is a single bar line at the left. */
+    const HOME_ROW = 138;                       /* middle of track row 10 */
+    const WANT = { 1: [0, 48], 2: [96, 24], 4: [48, 12], 8: [24, 0] };
+    for (const z of [1, 2, 4, 8]) {
+        toHome();
+        setZoom(z);
+        const m = meter(frame(), HOME_ROW);
+        check(m.barSp === WANT[z][0] && m.beatSp === WANT[z][1],
+              'HOME x' + z + ' meter spacing ' + WANT[z][0] + '/' + WANT[z][1] + 'px',
+              'bar=' + m.barSp + ' beat=' + m.beatSp + ' beats=' + m.beat.length);
+    }
+
+    /* ---- 2. the zoom wheel works ON THE HOME PAGE (rev.21) ----
+     * rev.20 put the handler in ui_grid_encoder only — the one page that does
+     * NOT draw the hero — so the screen carrying the `x4` readout could not
+     * move it. Assert the wheel is effective where the hero is visible. */
+    toHome();
+    setZoom(1);
+    const before = meter(frame(), HOME_ROW).barSp;
+    M._ds_web_btn(B_GLO, 1); M._ds_web_enc(EN_K2, 1); M._ds_web_btn(B_GLO, 0);
+    const after = meter(frame(), HOME_ROW).barSp;
+    check(before === 0 && after === 96, 'HOME: GLO+K2 steps x1 -> x2 without leaving HOME',
+          'before=' + before + ' after=' + after);
+
+    /* ---- 3. plain K2 on HOME is still LOOP LEN, not zoom ----
+     * The modifier must not leak: K2 without GLO keeps its documented job. */
+    toHome();
+    setZoom(4);
+    const barsBefore = meter(frame(), HOME_ROW).bar;
+    M._ds_web_enc(EN_K2, 1);                    /* bare K2 = LEN +1 */
+    const barsAfter = meter(frame(), HOME_ROW).bar;
+    check(JSON.stringify(barsBefore) === JSON.stringify(barsAfter),
+          'HOME: bare K2 does not change the time axis', 'zoom leaked through K2');
+
+    /* ---- 4. ARP result strip shares the hero axis (rev.21) ----
+     * The strip claims to be "the same absolute time axis as the hero"; at x1
+     * a 1/16 cell is 12px, at x4 it is 3px. Measure the strip's on-blocks:
+     * a 4-on-16 kick track at x1 shows 4 blocks in one bar; zoomed out the
+     * same pattern repeats and the blocks shrink. The point of the assertion
+     * is only that the strip RESCALES — the exact block count depends on the
+     * demo pattern. */
+    const STRIP_ROW = 20;
+    const stripRuns = (fb) => {
+        const r = []; let s = -1;
+        for (let x = 47; x < 239; x++) {
+            const on = px(fb, x, STRIP_ROW) !== '40,40,48';   /* not strip bg */
+            if (on && s < 0) s = x;
+            if (!on && s >= 0) { r.push(x - s); s = -1; }
+        }
+        return r;
+    };
+    setZoom(1);
+    btn(B_ARP);
+    const w1 = stripRuns(frame());
+    setZoom(4);
+    const w4 = stripRuns(frame());
+    check(w1.length > 0 && w4.length > 0,
+          'ARP strip draws on-blocks at both zooms',
+          'x1=' + w1.length + ' x4=' + w4.length);
+    check(w1.length > 0 && w4.length > w1.length,
+          'ARP strip follows the hero zoom (x4 shows more steps than x1)',
+          'x1 blocks=' + w1.length + ' x4 blocks=' + w4.length);
+    check(w4.length > 0 && w4[0] < w1[0],
+          'ARP strip blocks shrink when zoomed out',
+          'x1 first width=' + w1[0] + ' x4 first width=' + w4[0]);
+
+    /* ---- 5. the zoom readout actually redraws ----
+     * Reading "x8" out of glyph pixels would need OCR, but the property that
+     * matters is weaker and testable: the readout band must CHANGE when the
+     * zoom changes. A readout wired to a stale variable would be byte-equal. */
+    const READOUT = (fb) => {
+        let sig = '';
+        for (let y = 2; y < 14; y++)
+            for (let x = 160; x < 192; x++) sig += px(fb, x, y) === '24,24,32' ? '.' : '#';
+        return sig;
+    };
+    toHome();
+    setZoom(4);
+    const r4 = READOUT(frame());
+    setZoom(8);
+    const r8 = READOUT(frame());
+    check(r4.includes('#') && r4 !== r8,
+          'HOME: zoom readout repaints when the zoom changes');
+
+    console.log(fails ? '== ' + fails + ' UI PROBE FAILURES ==' : 'UI PROBE OK');
+    process.exit(fails ? 1 : 0);
+});

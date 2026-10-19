@@ -5,10 +5,16 @@
  * input routes into ui handlers, ds_tick() runs on the 1 ms cadence and
  * its out[] byte stream drains to USB MIDI. */
 
-static void midi_transport_usb3(uint8_t st, uint8_t d1, uint8_t d2);  /* ctrl_glue.c */
+/* ---- MIDI transport: 3-byte app events <-> USB-MIDI event packets ----
+ * Same packing as fm1-ctrl ctrl_main.c: byte0 = cable|CIN (0x9 note, 0xB other
+ * channel messages), then status/d1/d2. The ring carries 4-byte packets. */
+static void midi_transport_usb3(uint8_t st, uint8_t d1, uint8_t d2)
+{
+    uint32_t cin = ((st & 0xF0u) == 0x90u || (st & 0xF0u) == 0x80u) ? 0x9u : 0xBu;
+    plat_midi_out((uint32_t)cin | (uint32_t)st << 8 | (uint32_t)d1 << 16 | (uint32_t)d2 << 24);
+}
 
 /* TIMER5 ISR: fm1-ctrl's (no audio on this firmware) */
-static void isr_timer5(void);
 static void ds_timer5_irq(void)
 {
     static uint32_t sub;
@@ -31,6 +37,8 @@ static void ds_timer5_irq(void)
         }
     }
 }
+
+static void isr_timer5(void) { ds_timer5_irq(); }
 
 static void ds_main(void);
 extern uint8_t _bss_start[], _bss_end[], _pool_start[], _pool_end[];
