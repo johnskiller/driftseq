@@ -190,10 +190,21 @@ static void ui_draw_footer(void)
  * line sweeps the whole grid; drift reads as notes sliding against the bar
  * lines instead of sixteen playheads drifting apart. */
 #define TPB      96                        /* ticks per 4/4 bar @24 PPQ */
-#define HXBARS   4
-#define HXSPAN   (TPB * HXBARS)            /* 384 ticks */
 #define HX0      47
-#define HX1      (HX0 + HXSPAN / 2)        /* 239 */
+#define HXW      192                       /* bar area is always 192px wide */
+#define HX1      (HX0 + HXW)               /* 239, independent of zoom */
+/* ZOOM (rev.20): the window spans 1/2/4/8 bars but keeps 192px, so zooming
+ * changes TICKS PER PIXEL, not the drawing width:
+ *   1 bar  96t / 192px = 2.0 px/tick   (1/16 cell = 12px)
+ *   2 bar 192t / 192px = 1.0 px/tick   (1/16 cell =  6px)
+ *   4 bar 384t / 192px = 0.5 px/tick   (1/16 cell =  3px)  <- default
+ *   8 bar 768t / 192px = 0.25px/tick   (1/16 cell = 1.5px)
+ * John's original point: 64 steps is the ceiling but most tracks use 16, so
+ * at 4 bars a 16-step 1/16 loop only filled a quarter of the screen. */
+static uint8_t hero_bars = 4;              /* 1, 2, 4 or 8 */
+static int hxspan(void) { return TPB * (int)hero_bars; }
+/* tick -> x offset within the bar area (exact integer math, 192/span) */
+static int tx(int tick) { return (tick * HXW) / hxspan(); }
 
 /* cell length in 24-PPQ ticks — every division is an exact integer */
 static int cell_ticks(uint8_t div)
@@ -218,8 +229,10 @@ static const char *div_str(uint8_t div)
     default:         return "1/16";
     }
 }
-/* block width for a cell of ct ticks: cell px minus the 1px gap, min 1 */
-static int step_w(int ct) { int w = ct / 2 - 1; return w < 1 ? 1 : w; }
+/* block width for a cell of ct ticks: cell px minus the 1px gap, min 1.
+ * MUST go through tx() — a zoom-independent width would make blocks wider
+ * than the cell pitch once zoomed out (at 8 bars a 1/16 cell is 1.5px). */
+static int step_w(int ct) { int w = tx(ct) - 1; return w < 1 ? 1 : w; }
 
 /* distance (in steps) from s to the next step holding a voice, within the
  * window; 0xFF gate means "hold until that event or the loop end" */
@@ -250,6 +263,14 @@ static void draw_home(void)
     }
     cv_text(204, 4, &FONT_T, txt_join("S", txt_num(0, TRK()->loop_start)),
             TRK()->mute ? MUTE_GRAY : GREEN_OK);
+    {   /* zoom readout: the window is 1/2/4/8 bars; "x4" tells the user how
+         * much time the 192px bar area covers, so a loop's on-screen width is
+         * never mistaken for its real length. */
+        char *b = txt_next();
+        strcpy_(b, "x");
+        fmt_int(txt_end(b), (int32_t)hero_bars);
+        cv_text(168, 4, &FONT_T, b, RGB565(122, 122, 136));
+    }
     for (t = 0; t < 16; t++) {
         ds_track *tr = &g.pat.track[t];
         int y = 24 + (int)t * 12;
@@ -259,7 +280,7 @@ static void draw_home(void)
         int ct = cell_ticks(tr->division);       /* ticks per step (12/8/6/4/3) */
         int loop_ticks = (int)tr->loop_len * ct; /* one full window pass */
         int bw = step_w(ct);                     /* block width, 1px floor */
-        int npass = loop_ticks > 0 ? (HXSPAN + loop_ticks - 1) / loop_ticks : 1;
+        int npass = loop_ticks > 0 ? (hxspan() + loop_ticks - 1) / loop_ticks : 1;
         int pass;
         uint8_t s;
         /* gutter (46px): TRK nn | LEN nn | route | M */
@@ -274,40 +295,60 @@ static void draw_home(void)
                 goto outline;
             continue;
         }
-        /* ---- background 1: loop passes (15% hue) + restart seam ----
-         * A pass shorter than 8px gets no seam: below that the seam is the
-         * same width as the band itself and reads as noise. */
+        /* ---- background 1: loop passes, ALTERNATING brightness ----
+         * Each pass is one full loop of this track, so the stripe pattern
+         * directly shows both loop LENGTH (how wide one stripe is) and
+         * POSITION (where the stripes break) on the shared time axis.
+         * Alternating 15% / 8% hue beats a 1px seam line: a restart always
+         * coincides with step 0, and step 0 usually holds a note, so a seam
+         * would be painted over by that note's block. Opacity alternation
+         * never collides and stays readable at any pass width. */
         for (pass = 0; pass < npass; pass++) {
-            int x0 = HX0 + (pass * loop_ticks) / 2;
-            int xw = loop_ticks / 2;
+            int x0 = HX0 + tx(pass * loop_ticks);
+            int xw = tx(loop_ticks);
             if (x0 >= HX1)
                 break;
             if (x0 + xw > HX1)
                 xw = HX1 - x0;
-            cv_rect(x0, y, xw, 11, blend(col, RGB565(29, 29, 38), 217));
-            if (pass && xw >= 8)                     /* seam: 40% hue, 1px */
-                cv_rect(x0, y, 1, 11, blend(col, RGB565(29, 29, 38), 153));
+            cv_rect(x0, y, xw, 11,
+                    blend(col, RGB565(29, 29, 38), (pass & 1) ? 255 : 200));
         }
-        /* ---- background 2: meter (beat 24 ticks = 12px, bar 96 = 48px) ----
+        /* ---- background 2: meter (beat 24 ticks, bar 96 ticks) ----
          * Global, identical on every row: this is the reference that makes
-         * "12-step 1/8 restarts mid-bar" readable at a glance. */
-        {   int k;
-            for (k = 0; k <= HXSPAN / 24; k++) {
-                int x = HX0 + k * 12;
-                if (x >= HX1)
-                    break;
-                cv_rect(x, y, 1, 11, (k & 3) ? RGB565(44, 44, 54) : RGB565(64, 64, 78));
+         * "12-step 1/8 restarts mid-bar" readable at a glance. Beat spacing
+         * follows the zoom, so at 1 bar a beat is 48px and at 8 bars 6px —
+         * below 8px the beat lines stop being drawn (they become a comb and
+         * the bar lines alone carry the metric). */
+        {   int k, bx = tx(24);
+            int beats_per_bar = TPB / 24;            /* 4 in 4/4 */
+            if (bx >= 8) {
+                for (k = 0; k <= hxspan() / 24; k++) {
+                    int x = HX0 + tx(k * 24);
+                    if (x >= HX1)
+                        break;
+                    cv_rect(x, y, 1, 11,
+                            (k % beats_per_bar) ? RGB565(44, 44, 54) : RGB565(64, 64, 78));
+                }
+            } else {                                 /* 8-bar: bar lines only */
+                for (k = 0; k <= (int)hero_bars; k++) {
+                    int x = HX0 + tx(k * TPB);
+                    if (x >= HX1)
+                        break;
+                    cv_rect(x, y, 1, 11, RGB565(64, 64, 78));
+                }
             }
         }
+        /* ---- background 3 removed: the alternating pass stripes already
+         * show where a loop restarts (see background 1). ---- */
         /* ---- notes: one drawing pass per loop repetition ---- */
         for (pass = 0; pass < npass; pass++) {
             int tbase = pass * loop_ticks;
-            if (tbase >= HXSPAN)
+            if (tbase >= hxspan())
                 break;
             for (s = 0; s < tr->loop_len; s++) {
                 uint8_t si = (uint8_t)((tr->loop_start + s) & 63);
                 ds_step *st = &tr->steps[si];
-                int x = HX0 + (tbase + (int)s * ct) / 2;
+                int x = HX0 + tx(tbase + (int)s * ct);
                 int rel_end = (int)tr->loop_len - (int)s;   /* steps left in pass */
                 if (x >= HX1)
                     break;
@@ -345,7 +386,7 @@ static void draw_home(void)
                             gsteps = g;
                         if (gsteps > rel_end)          /* clamp at loop end */
                             gsteps = rel_end;
-                        gpx = (gsteps * ct) / 2;
+                        gpx = tx(gsteps * ct);
                         if (gpx < 1)
                             gpx = 1;
                         if (x + gpx > HX1)
@@ -366,10 +407,10 @@ outline:
         }
     }
     /* ONE global playhead: every track shares this axis, so a single white
-     * line sweeps the grid and wraps once per 4-bar view. */
+     * line sweeps the grid and wraps once per zoom window. */
     if (g.playing) {
-        int ph = (int)g.tick_acc % HXSPAN;
-        cv_rect(HX0 + ph / 2, 24, 1, 192, C_WHITE);
+        int ph = (int)g.tick_acc % hxspan();
+        cv_rect(HX0 + tx(ph), 24, 1, 192, C_WHITE);
     }
     cv_blit(0, 0);
     ui_draw_footer();

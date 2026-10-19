@@ -256,6 +256,13 @@ static void ui_home_encoder(uint8_t enc, int8_t det)
 
 static void ui_grid_encoder(uint8_t enc, int8_t det)
 {
+    if (enc == EN_K2 && glo_held) {              /* GLO+K2 = hero zoom (rev.20) */
+        int b = (int)hero_bars;
+        if (det > 0) b = (b == 1) ? 2 : (b == 2) ? 4 : 8;
+        else         b = (b == 8) ? 4 : (b == 4) ? 2 : 1;
+        hero_bars = (uint8_t)b;
+        return;
+    }
     if (enc == EN_K1) cursor_move(det);          /* K1 cursor (GLO+K1 x16) */
     else if (enc == EN_K2) ui_home_encoder(EN_K2, det);   /* K2 LEN */
     else if (enc == EN_K3 && det > 0) { TRK()->mute ^= 1; }
