@@ -75,9 +75,12 @@ static uint8_t enc_role(uint8_t matrix_enc)  /* matrix enc -> logical encoder, 0
 }
 
 /* ---- input routing (emu panelEnc/panelButton/panelKey parity) ---- */
-static void cursor_move(int8_t n)            /* GLO+K1 = x16 (rev.9 dead-stop) */
+static void cursor_move(int8_t n)            /* bare K1 = 1 step, dead-stop at 0/63 */
 {
-    int step = (glo_held ? 16 : 1) * (n > 0 ? 1 : -1);
+    /* rev.11 killed the GLO+K1 x16 jump: GLO+K1 is LOOP START on the GRID now,
+     * so the step here is never multiplied. 64 steps at 1 per detent is a
+     * deliberate trade — John picked the window shape over the fast scrub. */
+    int step = (n > 0 ? 1 : -1);
     int next = cursor + step;
     if (next < 0) next = 0;
     if (next > 63) next = 63;
@@ -85,8 +88,9 @@ static void cursor_move(int8_t n)            /* GLO+K1 = x16 (rev.9 dead-stop) *
 }
 
 /* black-key ordinal -> step-in-page. Key ids 0..26 = notes 53..79 (F3..G5);
- * black keys are the ids whose note % 12 is in {1,3,6,8,10} — ordinal 0..10
- * matches the emu's keybed (drum lane list = 11 black keys, r16f). */
+ * black keys are the ids whose note % 12 is in {1,3,6,8,10} — ordinal 0..10.
+ * Only 0..NDRUM-1 select a drum (currently 9 of 11); the rest are reserved for
+ * the v1.1 percussion expansion (03 §3, John 2026-10-19). */
 static const uint8_t KEY_IS_BLACK[27] = {
     0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0,   /* F3 F#3 G3 G#3 A3 A#3 B3 C4 */
     0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0,   /* F4..C5 */
@@ -121,7 +125,10 @@ static void panel_key_handler(uint8_t key, uint8_t down)
         int note;
         if (is_drum_trk()) {
             uint8_t bi = key_black_ordinal(key);
-            note = (bi != 0xFF) ? GM_DRUMS[bi] : 36;    /* white on drum = kick */
+            /* black key = that drum; the 2 reserved keys and white keys fall
+             * back to the selected drum / kick (audition only, never a write) */
+            note = (bi != 0xFF && bi < NDRUM) ? GM_DRUMS[bi]
+                 : (bi != 0xFF) ? GM_DRUMS[drum_sel] : 36;
         } else {
             note = 53 + (int)key + key_shift;
             if (note < 0) note = 0;
@@ -141,8 +148,14 @@ static void panel_key_handler(uint8_t key, uint8_t down)
         {
             uint8_t bi = key_black_ordinal(key);
             if (bi != 0xFF) {
-                drum_sel = bi;                    /* pick instrument */
-                ds_live_on(&g, sel_track, GM_DRUMS[bi], 100);   /* hear it */
+                /* 11 black keys, 9 lanes (03 §3): the last two are reserved for
+                 * the v1.1 percussion expansion and select nothing — "选不满
+                 * 不报错", and silently selecting a different drum than the
+                 * printed key would be worse than doing nothing. */
+                if (bi < NDRUM) {
+                    drum_sel = bi;                /* pick instrument */
+                    ds_live_on(&g, sel_track, GM_DRUMS[bi], 100);   /* hear it */
+                }
                 return;
             }
             {   /* white key = toggle sel drum on that step (page follows cursor) */
@@ -201,7 +214,7 @@ static void edit_key_handler(uint8_t key, uint8_t down)
             note = GM_DRUMS[bi];
         else {
             uint8_t wi = key_white_index(key);
-            if (wi >= 11u) wi = (uint8_t)(wi % 11u);      /* r16j: %GM_DRUMS.length */
+            if (wi >= NDRUM) wi = (uint8_t)(wi % NDRUM);  /* %GM_DRUMS.length */
             note = GM_DRUMS[wi];
         }
     } else {

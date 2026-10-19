@@ -11,9 +11,9 @@ static void draw_grid_drum(void);
 static void draw_arp(void);
 static void ui_draw_footer(void);
 
-/* edit/readout/arp internals (ui_edit.c) */
+/* edit/card/arp internals (ui_edit.c) */
 static void ui_draw_edit_panel(void);
-static void ui_draw_readout(void);
+static void ui_draw_drum_card(void);
 static void ui_arp_encoder(uint8_t enc, int8_t det);
 static void ui_edit_encoder(uint8_t enc, int8_t det);
 static void ui_grid_encoder(uint8_t enc, int8_t det);

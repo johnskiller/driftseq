@@ -124,7 +124,18 @@ int main(void)
     CHECK(ui_mode == M_GRID, "SEQ enters GRID");
     CHECK(is_drum_trk(), "trk0 drum grid");
     panel_key_handler(5, 1);               /* idx5 = note58 A#3 = black ordinal 2 */
-    CHECK(drum_sel == 2, "black key idx5 (A#3) -> lane2 (TOM)");
+    CHECK(drum_sel == 2, "black key idx5 (A#3) -> lane2 (CHH)");
+    /* 2b. rev.22: only NDRUM=9 lanes exist. Black ordinals 9/10 are the two
+     * reserved keys — they must NOT move the selection (silently landing on a
+     * different drum than the printed key would be worse than doing nothing). */
+    { uint8_t keep = drum_sel;
+      panel_key_handler(20, 1);            /* idx20 = C#5 -> black ordinal 8, last lane */
+      CHECK(drum_sel == NDRUM - 1, "black key ordinal 8 = last real lane (SHK)");
+      panel_key_handler(22, 1);            /* idx22 = D#5 -> black ordinal 9 (reserved) */
+      CHECK(drum_sel == NDRUM - 1, "reserved black key 9 keeps the selection");
+      panel_key_handler(25, 1);            /* idx25 = F#5 -> black ordinal 10 (reserved) */
+      CHECK(drum_sel == NDRUM - 1, "reserved black key 10 keeps the selection");
+      drum_sel = keep; }
 
     /* 3. white key toggles the sel drum on its mapped step (key idx14 =
      *    note 67 G4 = white index 8 → page step 8; toggle there) */
@@ -136,13 +147,36 @@ int main(void)
       for (vi = 0; vi < TRK()->steps[0].nvoices; vi++) if (TRK()->steps[0].v[vi].note == 36) found = 1;
       CHECK(found, "white key re-adds KCK"); }
 
-    /* 4. cursor dead-stop (rev.9) — K1 = EN_K1 (3) after batch-2 role fix */
+    /* 4. cursor dead-stop (rev.9) — K1 = EN_K1 (3) after batch-2 role fix.
+     * GLO+K1 used to be an x16 jump; rev.11 gave GLO+K1 to LOOP START (03
+     * §2.2), so the same detent now moves the window instead of the cursor. */
     cursor = 0; ui_encoder(EN_K1, -1);
     CHECK(cursor == 0, "K1 left at st0 dead-stops");
     cursor = 63; ui_encoder(EN_K1, 1);
     CHECK(cursor == 63, "K1 right at st63 dead-stops");
-    cursor = 0; glo_held = 1; ui_encoder(EN_K1, 1); glo_held = 0;
-    CHECK(cursor == 16, "GLO+K1 = x16 jump");
+    cursor = 0; { uint8_t s0 = TRK()->loop_start;
+      glo_held = 1; ui_encoder(EN_K1, 1); glo_held = 0;
+      CHECK(cursor == 0, "GLO+K1 no longer moves the cursor (rev.11)");
+      CHECK(TRK()->loop_start == (uint8_t)(s0 + 1), "GLO+K1 = LOOP START (rev.11)");
+      TRK()->loop_start = s0; }
+    /* rev.22: GLO+K3 = DIVISION on the GRID, dead-stop at both ends.
+     * demo tune track 0 is 1/16, so one detent down lands on 1/8T, not 1/8. */
+    { uint8_t d0 = TRK()->division;
+      glo_held = 1;
+      ui_encoder(EN_K3, -1);
+      CHECK(TRK()->division == DS_DIV_8T, "GLO+K3 down = 1/8T");
+      ui_encoder(EN_K3, -1);
+      CHECK(TRK()->division == DS_DIV_8, "GLO+K3 down = 1/8");
+      ui_encoder(EN_K3, -1);
+      CHECK(TRK()->division == DS_DIV_8, "GLO+K3 dead-stops at 1/8");
+      ui_encoder(EN_K3, 1); ui_encoder(EN_K3, 1); ui_encoder(EN_K3, 1); ui_encoder(EN_K3, 1);
+      CHECK(TRK()->division == DS_DIV_32, "GLO+K3 reaches 1/32");
+      ui_encoder(EN_K3, 1);
+      CHECK(TRK()->division == DS_DIV_32, "GLO+K3 dead-stops at 1/32");
+      glo_held = 0;
+      ui_encoder(EN_K3, 1);
+      CHECK(TRK()->division == DS_DIV_32, "bare K3 is still MUTE, not DIV");
+      TRK()->division = d0; }
     { uint8_t t0 = sel_track; ui_encoder(EN_SELECT, 1);
       CHECK(sel_track == t0 + 1, "SELECT encoder moves track");
       sel_track = 0; }                     /* tests below assume trk0 (drum) */

@@ -71,6 +71,18 @@ createMod().then((M) => {
     M._ds_ui_boot();
     M._ds_ui_frame(0.016);
 
+    /* ---- 0. the boot zoom is x4 (John 2026-10-19) ----
+     * Must run before any setZoom(). x4 is the default because it is the only
+     * level where one bar fills the 192px area at 1/16 AND the 4-bar phrase
+     * John actually plays still fits — x8 hides the phrase, x1 wastes 3/4 of
+     * the screen on one bar. Pinning it here so a stray initialiser change
+     * cannot silently re-scale every screen. */
+    {
+        const m = meter(frame(), 138);           /* same row as §1 (see below) */
+        check(m.barSp === 48 && m.beatSp === 12,
+              'boot zoom is x4 (bar/beat = 48/12px)', 'bar=' + m.barSp + ' beat=' + m.beatSp);
+    }
+
     /* ---- 1. HOME hero meter spacing across the four zoom levels ----
      * bar area is always 192px; zoom changes ticks per pixel, so the bar
      * spacing must be 192/96/48/24 — measured, not assumed. At x1 one bar
@@ -157,6 +169,61 @@ createMod().then((M) => {
     const r8 = READOUT(frame());
     check(r4.includes('#') && r4 !== r8,
           'HOME: zoom readout repaints when the zoom changes');
+
+    /* ---- 6. DIVISION lives on the GRID page (rev.22) ----
+     * John: "DIV现在没有设定的方法，在grid screen设置比较好". Two contracts:
+     * (a) GLO+K3 on the GRID changes the track division; (b) the change is
+     * visible on the page that owns it — a blind twist with no feedback is the
+     * same as no control at all. HOME only displays the value. */
+    const DIV_X0 = 96, DIV_X1 = 120;          /* the DIV column, both grid pages */
+    const GRID_DIV = (fb) => {
+        let sig = '';
+        for (let y = 2; y < 14; y++)
+            for (let x = DIV_X0; x < DIV_X1; x++) sig += px(fb, x, y) === '24,24,32' ? '.' : '#';
+        return sig;
+    };
+    toHome(); toGrid();
+    const div0 = GRID_DIV(frame());
+    M._ds_web_btn(B_GLO, 1);
+    M._ds_web_enc(EN_K3, 1);                  /* 1/16 -> 1/16T */
+    M._ds_web_btn(B_GLO, 0);
+    const div1 = GRID_DIV(frame());
+    check(div0.includes('#') && div0 !== div1,
+          'GRID: GLO+K3 changes DIV and the readout repaints on the page itself');
+
+    /* The same readout must sit in the SAME column on the melodic grid too:
+     * one parameter, one place. A per-track-type column means the eye has to
+     * re-find the value every time SELECT crosses the drum track. */
+    const inkLeft = (fb) => {
+        for (let x = 60; x < 150; x++)
+            for (let y = 2; y < 14; y++)
+                if (px(fb, x, y) !== '24,24,32') return x;
+        return -1;
+    };
+    const drumLeft = inkLeft(frame());
+    M._ds_web_enc(EN_SELECT, 1);              /* drum trk0 -> melodic trk1 */
+    const melLeft = inkLeft(frame());
+    check(drumLeft !== -1 && melLeft === drumLeft,
+          'GRID: DIV readout keeps its column across drum/melodic tracks',
+          'drum starts at ' + drumLeft + ', melodic at ' + melLeft);
+    M._ds_web_enc(EN_SELECT, -1);             /* back to trk0 */
+
+    /* ---- 7. the GLO layer names itself in the footer ----
+     * While GLO is held the four big boxes stop being STEP/LEN/MUTE/PROB; a
+     * footer that keeps printing the bare names is actively lying about what
+     * the encoder will do. The layer row must differ from the resting row. */
+    const FOOT = (fb) => {
+        let sig = '';
+        for (let y = 220; y < 234; y++)
+            for (let x = 4; x < 200; x++) sig += px(fb, x, y) === '24,24,32' ? '.' : '#';
+        return sig;
+    };
+    const footRest = FOOT(frame());
+    M._ds_web_btn(B_GLO, 1);
+    const footGlo = FOOT(frame());
+    M._ds_web_btn(B_GLO, 0);
+    check(footRest.includes('#') && footRest !== footGlo,
+          'GRID: holding GLO swaps the footer to the modifier layer names');
 
     console.log(fails ? '== ' + fails + ' UI PROBE FAILURES ==' : 'UI PROBE OK');
     process.exit(fails ? 1 : 0);

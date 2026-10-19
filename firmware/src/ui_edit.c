@@ -55,32 +55,69 @@ static void ui_draw_edit_panel(void)
     cv_blit(0, 112);
 }
 
-/* ---- drum readout strip (r16e/r16j: 56px, text is the data) ---- */
-static void ui_draw_readout(void)
+/* ---- drum single-drum card (03 §3.1 rev.13c): the panel is ONE enlarged card
+ * for the selected drum, not a list of every drum at this step. John's call:
+ * "同时编辑一个 step 的不同鼓" is a rare need — the lanes panorama above already
+ * answers "what is on this step"; fine editing is always one object. Swapping
+ * instruments = one black key, so two cards side by side would only cost space.
+ *
+ * Layout: lanes end at y=16+9*11=115, so the card owns y115..215 (100px) and
+ * the footer 216..239. Big numbers + three full-width parameter bars (the
+ * same bg-luminance/hue-length/gray-out grammar as the melodic EDIT cards),
+ * so the value can be read as a number OR as a shape. */
+static void ui_draw_drum_card(void)
 {
     ds_step *st = &TRK()->steps[cursor];
     int hit = -1, vi;
     for (vi = 0; vi < st->nvoices; vi++)
         if (st->v[vi].note == GM_DRUMS[drum_sel]) hit = vi;
-    cv_begin(240, 56, RGB565(16, 16, 21));
-    cv_rect(0, 0, 240, 1, RGB565(58, 58, 68));
-    cv_rect(2, 3, 236, 50, focus_layer ? RGB565(46, 46, 58) : RGB565(22, 22, 27));
-    if (focus_layer) {                               /* yellow outline when editing */
+    cv_begin(240, 100, RGB565(16, 16, 21));
+    cv_rect(0, 0, 240, 1, RGB565(58, 58, 68));       /* separator at y115 */
+    cv_rect(2, 3, 236, 94, focus_layer ? RGB565(46, 46, 58) : RGB565(22, 22, 27));
+    if (focus_layer) {                               /* yellow = editing this card */
         cv_rect(2, 3, 236, 1, YELLOW);
-        cv_rect(2, 52, 236, 1, YELLOW);
-        cv_rect(2, 3, 1, 50, YELLOW);
-        cv_rect(237, 3, 1, 50, YELLOW);
+        cv_rect(2, 96, 236, 1, YELLOW);
+        cv_rect(2, 3, 1, 94, YELLOW);
+        cv_rect(237, 3, 1, 94, YELLOW);
     }
-    cv_text(10, 8, &FONT_XS, txt_join(GM_SHORT[drum_sel], txt_st(cursor + 1)), D_PAL[drum_sel]);
-    if (hit >= 0)
-        cv_text(70, 8, &FONT_XS,
-                txt_vgp(st->v[hit].vel,
-                        st->v[hit].gate == 0xFF ? 0 : st->v[hit].gate,
-                        st->prob), WARMWHITE);
-    else
-        cv_text(70, 8, &FONT_XS, "-- toggle: white key", WARMWHITE);
-    cv_text(10, 34, &FONT_XS, "edit: VEL GAT PROB", RGB565(138, 138, 153));
-    cv_blit(0, 160);
+    /* identity: 3-char drum name + step number, in the instrument's own colour */
+    cv_text(10, 7, &FONT_M, GM_SHORT[drum_sel], D_PAL[drum_sel]);
+    cv_text(78, 12, &FONT_T, txt_st(cursor + 1), RGB565(122, 122, 136));
+    if (hit < 0) {                                   /* not voiced on this step */
+        cv_text(10, 44, &FONT_T, "off", RGB565(85, 85, 95));
+        cv_text(10, 66, &FONT_T, "white key = toggle", RGB565(85, 85, 95));
+        cv_text(10, 82, &FONT_T, "K1 VEL  K2 GAT  K3 PROB", RGB565(106, 106, 118));
+        cv_blit(0, 115);
+        return;
+    }
+    {
+        uint8_t vel = st->v[hit].vel, gate = st->v[hit].gate, prob = st->prob;
+        uint16_t hue = D_PAL[drum_sel];
+        char *b;
+        /* VEL row: bg luminance = velocity (same grammar as the melodic cards) */
+        cv_rect(3, 34, 234, 20, blend(RGB565(186, 186, 186), RGB565(46, 46, 46),
+                                      (uint8_t)(255 - vel * 255 / 127)));
+        b = txt_next(); strcpy_(b, "VEL ");
+        fmt_int(txt_end(b), vel);
+        cv_text(8, 38, &FONT_T, b, RGB565(20, 20, 24));
+        /* GATE row: hue bar length = gate (8 steps = full), like EDIT PIT/GAT */
+        cv_rect(3, 56, 234, 20, RGB565(30, 30, 36));
+        cv_rect(3, 56, gate == 0xFF ? 234 : (gate > 8 ? 234 : (int)gate * 29 + 3), 20,
+                blend(hue, RGB565(30, 30, 36), (uint8_t)(255 - prob * 255 / 100)));
+        b = txt_next(); strcpy_(b, "GAT ");
+        if (gate == 0xFF) strcpy_(txt_end(b), "hold");
+        else fmt_int(txt_end(b), gate);
+        cv_text(8, 60, &FONT_T, b, C_WHITE);
+        /* PROB row: gray-out = probability (never a colour change: the hue is
+         * the instrument's identity, not a parameter) */
+        cv_rect(3, 78, 234, 20, RGB565(30, 30, 36));
+        cv_rect(3, 78, prob * 234 / 100, 20, blend(hue, RGB565(30, 30, 36),
+                                                    (uint8_t)(prob * 255 / 100)));
+        b = txt_next(); strcpy_(b, "PROB ");
+        fmt_int(txt_end(b), prob);
+        cv_text(8, 82, &FONT_T, b, C_WHITE);
+    }
+    cv_blit(0, 115);
 }
 
 /* ---- ARP (r16j drawArp verbatim): strip y16..28, ring center (120,112)
@@ -182,10 +219,10 @@ static void draw_arp(void)
                     cv_rect(px, sy, bw, sh, blend(tcol, RGB565(24, 24, 32), 205));
                     for (vi = 0; vi < tr->steps[(start + i) & 63].nvoices; vi++) {
                         uint8_t d;
-                        for (d = 0; d < 11; d++)
+                        for (d = 0; d < NDRUM; d++)
                             if (tr->steps[(start + i) & 63].v[vi].note == GM_DRUMS[d]) mask |= (uint8_t)(1u << d);
                     }
-                    for (li = 0; li < 9 && row < 4; li++) {
+                    for (li = 0; li < NDRUM && row < 4; li++) {
                         if (!(mask & (1u << li))) continue;
                         cv_rect(px, sy + 1 + row * 3, bw, 1, D_PAL[li % 11]);
                         row++;
@@ -261,6 +298,27 @@ static void zoom_encoder(int8_t det)
     hero_bars = (uint8_t)b;
 }
 
+static void loop_start_encoder(int8_t det)    /* dead-stop 0..63 (spec 02 §4) */
+{
+    int v = TRK()->loop_start + det;
+    if (v < 0) v = 0;
+    if (v > 63) v = 63;
+    TRK()->loop_start = (uint8_t)v;
+}
+
+/* DIVISION (rev.22, John 2026-10-19: "DIV现在没有设定的方法，在grid screen
+ * 设置比较好"). A per-track step length (01 §1), so it belongs on the page
+ * that draws the steps — the HOME top bar only DISPLAYS it. Five values, dead
+ * stop at both ends like every other detent in this UI: cycling would let a
+ * blind twist wrap past 1/32 back to 1/8 unnoticed. */
+static void track_div_encoder(int8_t det)
+{
+    int v = (int)TRK()->division + det;
+    if (v < DS_DIV_8) v = DS_DIV_8;
+    if (v > DS_DIV_32) v = DS_DIV_32;
+    TRK()->division = (uint8_t)v;
+}
+
 /* ---- per-page encoder behavior ---- */
 static void ui_home_encoder(uint8_t enc, int8_t det)
 {
@@ -270,10 +328,7 @@ static void ui_home_encoder(uint8_t enc, int8_t det)
         return;
     }
     if (enc == EN_K1) {                          /* K1 LOOP START (dead-stop) */
-        int v = tr->loop_start + det;
-        if (v < 0) v = 0;
-        if (v > 63) v = 63;
-        tr->loop_start = (uint8_t)v;
+        loop_start_encoder(det);
     } else if (enc == EN_K2) {                   /* K2 LEN 1..64 */
         int v = tr->loop_len + det;
         if (v < 1) v = 1;
@@ -295,7 +350,15 @@ static void ui_grid_encoder(uint8_t enc, int8_t det)
         zoom_encoder(det);
         return;
     }
-    if (enc == EN_K1) cursor_move(det);          /* K1 cursor (GLO+K1 x16) */
+    if (enc == EN_K1 && glo_held) {              /* GLO+K1 = LOOP START (rev.11) */
+        loop_start_encoder(det);
+        return;
+    }
+    if (enc == EN_K3 && glo_held) {              /* GLO+K3 = DIVISION (rev.22) */
+        track_div_encoder(det);
+        return;
+    }
+    if (enc == EN_K1) cursor_move(det);          /* K1 cursor (bare: the fast path) */
     else if (enc == EN_K2) ui_home_encoder(EN_K2, det);   /* K2 LEN */
     else if (enc == EN_K3 && det > 0) { TRK()->mute ^= 1; }
     else if (enc == EN_K4) ui_home_encoder(EN_K4, det);   /* K4 PROB */

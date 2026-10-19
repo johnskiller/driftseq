@@ -130,11 +130,18 @@ static char *chord_name(uint8_t t, uint8_t s)
     return b;
 }
 
-/* ---- footer (prefix-free, fixed columns, 10px) ---- */
+/* ---- footer (prefix-free, fixed columns, 10px) ----
+ * The footer is the contract "手不用看旋钮就知道在改什么" (03 §0), so the GLO
+ * layer gets its own row of names: while GLO is held the four big boxes are
+ * no longer STEP/LEN/MUTE/PROB, and showing the bare names would actively lie. */
 static void ui_draw_footer(void)
 {
     static const char *const FOOT_HOME[] = {"START", "LEN", "MUTE", "PROB"};
     static const char *const FOOT_GRID[] = {"STEP", "LEN", "MUTE", "PROB"};
+    /* GLO layer on GRID: K1 START (rev.11), K3 DIV (rev.22); K2 zoom lives on
+     * HOME too, so it is named here as well — the modifier is page-independent. */
+    static const char *const FOOT_GLO_GRID[] = {"START", "ZOOM", "DIV", "PROB"};
+    static const char *const FOOT_GLO_HOME[] = {"START", "ZOOM", "MUTE", "PROB"};
     static const char *const FOOT_EDIT[] = {"PIT", "GAT", "VEL", "PROB", "SEL"};
     static const char *const FOOT_DRUM[] = {"VEL", "GAT", "PROB"};
     static const char *const FOOT_ARP[]  = {"K", "N", "ROT", "LINK"};
@@ -150,6 +157,10 @@ static void ui_draw_footer(void)
     } else if (ui_mode == M_ARP) {
         for (k = 0; k < 4; k++)
             cv_text(FX[k], 6, &FONT_T, FOOT_ARP[k], FOOT_GRAY);
+    } else if (glo_held && ui_mode != M_ARP) {
+        const char *const *f = (ui_mode == M_HOME) ? FOOT_GLO_HOME : FOOT_GLO_GRID;
+        for (k = 0; k < 4; k++)
+            cv_text(FX[k], 6, &FONT_T, f[k], YELLOW);
     } else {
         const char *const *f = (ui_mode == M_HOME) ? FOOT_HOME : FOOT_GRID;
         for (k = 0; k < 4; k++)
@@ -355,18 +366,23 @@ static void draw_home(void)
                 if (!st->on || !st->nvoices)
                     continue;
                 if (is_drum) {
-                    /* rev.14e: 9-lane instrument mini-lines, top->bottom */
-                    uint8_t mask = 0, li, row = 0, vi;
+                    /* rev.14e: 9-lane instrument mini-lines, top->bottom
+                     * (NDRUM lanes: same order/colours as 03 §3 DRUM GRID) */
+                    /* mask must hold NDRUM bits: at 9 lanes a uint8_t loses
+                     * bit 8 (the 9th drum) silently — the SHK line simply
+                     * never appeared in the hero. */
+                    uint16_t mask = 0;
+                    uint8_t li, row = 0, vi;
                     cv_rect(x, y, bw, 11, blend(col, RGB565(29, 29, 38), 205));
                     for (vi = 0; vi < st->nvoices; vi++) {
                         uint8_t d;
-                        for (d = 0; d < 11; d++)
-                            if (st->v[vi].note == GM_DRUMS[d]) mask |= (uint8_t)(1u << d);
+                        for (d = 0; d < NDRUM; d++)
+                            if (st->v[vi].note == GM_DRUMS[d]) mask |= (uint16_t)(1u << d);
                     }
-                    for (li = 0; li < 9 && row < 4; li++) {
+                    for (li = 0; li < NDRUM && row < 4; li++) {
                         if (!(mask & (1u << li)))
                             continue;
-                        cv_rect(x, y + 1 + row * 3, bw, 1, D_PAL[li % 11]);
+                        cv_rect(x, y + 1 + row * 3, bw, 1, D_PAL[li]);
                         row++;
                     }
                 } else {
@@ -450,6 +466,11 @@ static void draw_grid_melodic(void)
     cv_begin(240, 224, C_BLACK);
     cv_rect(0, 0, 240, 16, TB_BG);
     cv_text(6, 2, &FONT_T, txt_join("SEQ TRK", txt_num(0, sel_track + 1)), TB_TX);
+    /* DIV readout (rev.22): GLO+K3 changes the division on this page, so the
+     * value has to be visible here — otherwise the twist has no feedback until
+     * the user walks back to HOME. Column 96 for BOTH grid pages: same value,
+     * same place — the eye should not have to hunt per track type. */
+    cv_text(96, 2, &FONT_T, div_str(tr->division), RGB565(122, 122, 136));
     {   /* r16j: `st${cursor+1}${cn?' '+cn:''}` — chord quality on the right */
         char *cn = chord_name(sel_track, cursor);
         cv_text(150, 2, &FONT_T, txt_join2(txt_st(cursor + 1), *cn ? txt_join("", cn) : (char *)0),
@@ -500,16 +521,18 @@ static void draw_grid_melodic(void)
     ui_draw_footer();
 }
 
-/* ---- DRUM GRID (r16j drawDrumGrid verbatim: 11 lanes x13px, cells 9x9
- * GAP4, hollow/solid, gate dimming, playhead column, readout strip 56px) */
+/* ---- DRUM GRID (03 §3): NDRUM lanes x 11px (7px cell + 4px gap), cells 9x9
+ * GAP4, hollow/solid, gate dimming, playhead column, readout strip 56px.
+ * Vertical budget (rev.13b): 16 top + 9x11 lanes (99) + 4x25 panel (100) +
+ * 24 footer = 239px. Same main-area height as the melodic 4x24 grid. */
 static void draw_grid_drum(void)
 {
     uint8_t page = cursor >> 4;
-    int li, c, x0 = 30, y0 = 16, lh = 13, gap = 4;
+    int li, c, x0 = 30, y0 = 16, lh = 11, gap = 4;
     int cw = (240 - x0) / 16;                        /* 13 */
-    uint8_t lane_in_use[11];
+    uint8_t lane_in_use[NDRUM];
     int pos = (int)g.pos16[sel_track];
-    for (li = 0; li < 11; li++) {                    /* r16i: which drums are voiced? */
+    for (li = 0; li < NDRUM; li++) {                 /* r16i: which drums are voiced? */
         int s;
         lane_in_use[li] = 0;
         for (s = 0; s < 64 && !lane_in_use[li]; s++) {
@@ -522,11 +545,12 @@ static void draw_grid_drum(void)
     cv_rect(0, 0, 240, 16, TB_BG);
     cv_text(6, 2, &FONT_T, txt_join(txt_trk("DRUM TRK", sel_track + 1),
              txt_join("P", txt_join(txt_num(0, page + 1), "/4"))), TB_TX);
+    cv_text(96, 2, &FONT_T, div_str(TRK()->division), RGB565(122, 122, 136));
     cv_text(150, 2, &FONT_T, txt_join(txt_st(cursor + 1), GM_SHORT[drum_sel]),
             TRK()->mute ? MUTE_GRAY : GREEN_OK);
     if (focus_layer)
         ui_draw_edit_badge();
-    for (li = 0; li < 11; li++) {
+    for (li = 0; li < NDRUM; li++) {
         int y = y0 + li * lh;
         uint8_t sel = (li == drum_sel);
         cv_text(2, y + 2, &FONT_T, GM_SHORT[li], sel ? RGB565(201, 201, 212) : RGB565(106, 106, 118));
@@ -539,7 +563,7 @@ static void draw_grid_drum(void)
             for (vi = 0; vi < st->nvoices; vi++)
                 if (st->v[vi].note == GM_DRUMS[li]) { on = 1; hit_gate = st->v[vi].gate; }
             if (on) {                                /* solid hit (35% when not sel lane) */
-                uint16_t col = blend(D_PAL[li % 11], C_BLACK, sel ? 0 : 166);
+                uint16_t col = blend(D_PAL[li], C_BLACK, sel ? 0 : 166);
                 int gf = (hit_gate == 0xFF) ? cellw : cellw * ((hit_gate * 64) / 32) / 256;
                 cv_rect(x, cy, cellw, cellh, col);
                 if (s == cursor && sel && gf < cellw) /* gate: dim the un-gated span */
@@ -557,18 +581,18 @@ static void draw_grid_drum(void)
                 cv_rect(x, cy, 1, cellh, stroke);
                 cv_rect(x + cellw - 1, cy, 1, cellh, stroke);
                 if (st->on && sel && lane_in_use[li])/* bare-gate tick (r16i) */
-                    cv_rect(x + 1, cy + cellh - 3, cellw - 2, 2, blend(D_PAL[li % 11], C_BLACK, 115));
+                    cv_rect(x + 1, cy + cellh - 3, cellw - 2, 2, blend(D_PAL[li], C_BLACK, 115));
             }
         }
     }
     if (g.playing) {                                 /* playhead: column + 16% veil */
         int px = x0 + (pos - page * 16) * cw;
         if (pos >= page * 16 && pos < page * 16 + 16) {
-            cv_rect(px, y0, cw, 11 * lh, blend(C_WHITE, C_BLACK, 219));
-            cv_rect(px, y0, 1, 11 * lh, C_WHITE);
+            cv_rect(px, y0, cw, NDRUM * lh, blend(C_WHITE, C_BLACK, 219));
+            cv_rect(px, y0, 1, NDRUM * lh, C_WHITE);
         }
     }
     cv_blit(0, 0);
-    ui_draw_readout();                               /* 56px text strip */
+    ui_draw_drum_card();                             /* 100px single-drum card */
     ui_draw_footer();
 }
