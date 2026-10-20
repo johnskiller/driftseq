@@ -123,15 +123,23 @@ createMod().then((M) => {
     /* ---- 4. ARP result strip shares the hero axis (rev.21) ----
      * The strip claims to be "the same absolute time axis as the hero"; at x1
      * a 1/16 cell is 12px, at x4 it is 3px. Measure the strip's on-blocks:
-     * a 4-on-16 kick track at x1 shows 4 blocks in one bar; zoomed out the
-     * same pattern repeats and the blocks shrink. The point of the assertion
-     * is only that the strip RESCALES — the exact block count depends on the
-     * demo pattern. */
+     * the same loop must show the same NUMBER of blocks at every zoom (one
+     * loop is one loop), only their widths change.
+     *
+     * rev.23 removed the tiling from both the hero and this strip, so the old
+     * "x4 shows more steps than x1" assertion is exactly the bug we deleted —
+     * it passed only because the loop was being repeated to fill the window. */
     const STRIP_ROW = 20;
+    /* Non-note colours on the strip: outer bg, in-loop bed, out-of-loop bed,
+     * beat line, bar line. Anything else on this row is a note block. Listing
+     * them explicitly beats "not the strip bg": rev.23 introduced a SECOND bed
+     * colour for the out-of-loop region, and a single-value test counted the
+     * whole dark tail as one enormous note. */
+    const STRIP_BED = new Set(['40,40,48', '42,42,51', '32,32,40', '48,48,56', '64,68,80']);
     const stripRuns = (fb) => {
         const r = []; let s = -1;
         for (let x = 47; x < 239; x++) {
-            const on = px(fb, x, STRIP_ROW) !== '40,40,48';   /* not strip bg */
+            const on = !STRIP_BED.has(px(fb, x, STRIP_ROW));
             if (on && s < 0) s = x;
             if (!on && s >= 0) { r.push(x - s); s = -1; }
         }
@@ -145,12 +153,89 @@ createMod().then((M) => {
     check(w1.length > 0 && w4.length > 0,
           'ARP strip draws on-blocks at both zooms',
           'x1=' + w1.length + ' x4=' + w4.length);
-    check(w1.length > 0 && w4.length > w1.length,
-          'ARP strip follows the hero zoom (x4 shows more steps than x1)',
+    check(w1.length === w4.length,
+          'ARP strip shows ONE loop at every zoom (rev.23: no tiling)',
           'x1 blocks=' + w1.length + ' x4 blocks=' + w4.length);
-    check(w4.length > 0 && w4[0] < w1[0],
+    check(w4.length > 0 && w4[0] <= w1[0],
           'ARP strip blocks shrink when zoomed out',
           'x1 first width=' + w1[0] + ' x4 first width=' + w4[0]);
+
+    /* ---- 4b. the hero shows ONE loop, not a tiled wallpaper (rev.23) ----
+     * John: "不需要铺满hero —— hero 显示 4bar、trk len 8step@1/16 只占 2bar，
+     * hero 就应该只显示 2bar，后面暗色表示 loop 外". Two measurable facts:
+     * (a) the bright band ends at the loop's own length, not at the window
+     *     edge, and rows with different loop lengths end at DIFFERENT x;
+     * (b) past that edge the bed is the out-of-loop colour, and notes stop
+     *     there too (a tiled row would still be drawing notes to 239). */
+    toHome();
+    setZoom(4);
+    /* px() reports RGB565-quantised values: RGB565(36,36,45) reads back as
+     * 32,36,40 and RGB565(29,29,38) as 24,28,32. Meter lines drawn over the
+     * bed must be excluded or every beat would count as "band". */
+    const OUT = '32,36,40', BG = '24,28,32';
+    const METER = new Set(['40,44,48', '64,64,72']);
+    const rowBed = (fb, t) => {
+        const y = 24 + t * 12 + 5;
+        let band = 0, out = 0;
+        for (let x = 47; x < 239; x++) {
+            const c = px(fb, x, y);
+            if (c === OUT) out++;
+            else if (c !== BG && !METER.has(c)) band++;
+        }
+        return { band, out };
+    };
+    {
+        const f = frame();
+        const perRow = [];
+        for (let t = 0; t < 16; t++) perRow.push(rowBed(f, t));
+        const withOut = perRow.filter((r) => r.out > 0).length;
+        check(withOut === 16,
+              'HERO: every row marks its out-of-loop tail (rev.23)', 'rows=' + withOut + '/16');
+        const lens = new Set(perRow.map((r) => r.band));
+        check(lens.size > 1,
+              'HERO: band width follows each track own loop length',
+              'distinct widths=' + lens.size + ' -> ' + [...lens].join(' '));
+        const widest = Math.max(...perRow.map((r) => r.band + r.out));
+        check(widest <= 193, 'HERO: no row is tiled past the window',
+              'widest row=' + widest + 'px of 192');
+    }
+
+    /* ---- 4c. every track draws its OWN playhead (rev.23) ----
+     * John: "这样每个trk都有自己的playhead，可以表现出drift". With loops of
+     * different lengths running off one clock, the heads must NOT all sit in
+     * one column — that is the whole point. Assert at least three distinct
+     * head positions while playing. */
+    btn(B_PLAY);
+    {
+        /* The demo's 16 tracks cluster into a few (len, division) groups, so a
+         * single frame can legitimately show only two positions — two groups
+         * that happen to coincide at that instant. Sample a sweep instead: the
+         * contract is "the heads do not all move as one", i.e. at SOME moment
+         * three or more distinct positions exist. */
+        let live = 0, best = 0, bestAt = 0;
+        for (let i = 0; i < 10; i++) {
+            M._ds_ui_frame(0.2);
+            const f = frame();
+            const heads = [];
+            for (let t = 0; t < 16; t++) {
+                const y = 24 + t * 12 + 5;
+                let hx = -1;
+                for (let x = 47; x < 239; x++) {
+                    const c = px(f, x, y);
+                    if (c === '248,252,248') { hx = x; break; }   /* C_WHITE, quantised */
+                }
+                heads.push(hx);
+            }
+            live = Math.max(live, heads.filter((h) => h >= 0).length);
+            const d = new Set(heads.filter((h) => h >= 0)).size;
+            if (d > best) { best = d; bestAt = 0.2 * (i + 1); }
+        }
+        check(live === 16, 'HERO: all 16 rows draw a playhead', 'heads=' + live);
+        check(best >= 3,
+              'HERO: playheads sit at different x per track (drift is visible)',
+              'max ' + best + ' distinct positions at +' + bestAt.toFixed(1) + 's');
+    }
+    btn(B_PLAY);
 
     /* ---- 5. the zoom readout actually redraws ----
      * Reading "x8" out of glyph pixels would need OCR, but the property that

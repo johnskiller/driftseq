@@ -188,8 +188,9 @@ static void ui_draw_footer(void)
  * 1/16 keeps exactly the rev.18 look (3px pitch, 2px block, 1px gap).
  *
  * BACKGROUND carries both references John asked for:
- *   loop  = 15% hue band per pass + a 40% hue seam at each pass restart
- *           (seam suppressed when a pass is < 8px wide, else it is noise)
+ *   loop  = ONE 15% hue band anchored at t=0; past its right edge the row is
+ *           "outside the loop" and drawn as a dark hatched bed (rev.23 —
+ *           the row is NOT tiled with repetitions any more)
  *   meter = bar lines (brighter) and beat lines (dimmer) over the band
  *
  * NOTES: melody rows draw the four voices as separate 1px lines (same slot
@@ -197,9 +198,11 @@ static void ui_draw_footer(void)
  * line length = that note's gate — a sustained note is literally a long
  * line. Drum rows keep the 9-lane instrument mini-lines.
  *
- * ONE global playhead: every track shares the axis now, so a single white
- * line sweeps the whole grid; drift reads as notes sliding against the bar
- * lines instead of sixteen playheads drifting apart. */
+ * ONE PLAYHEAD PER TRACK (rev.23): drift is a per-track fact — each loop
+ * wraps at its own length — so a single shared line could only ever show the
+ * global clock. Each row now draws its own head at its own position, and
+ * because the meter behind it stays global, drift reads as heads crossing the
+ * bar lines at different moments. */
 #define TPB      96                        /* ticks per 4/4 bar @24 PPQ */
 #define HX0      47
 #define HXW      192                       /* bar area is always 192px wide */
@@ -291,9 +294,10 @@ static void draw_home(void)
         int ct = cell_ticks(tr->division);       /* ticks per step (12/8/6/4/3) */
         int loop_ticks = (int)tr->loop_len * ct; /* one full window pass */
         int bw = step_w(ct);                     /* block width, 1px floor */
-        int npass = loop_ticks > 0 ? (hxspan() + loop_ticks - 1) / loop_ticks : 1;
-        int pass;
+        int lpx = tx(loop_ticks);                /* loop length in px (rev.23) */
         uint8_t s;
+        if (lpx > HXW)
+            lpx = HXW;
         /* gutter (46px): TRK nn | LEN nn | route | M */
         cv_text(2, y, &FONT_T, txt_num(0, t + 1), muted ? MUTE_GRAY : RGB565(154, 154, 168));
         cv_text(15, y, &FONT_T, txt_num(0, tr->loop_len), muted ? RGB565(74, 74, 82) : RGB565(106, 106, 120));
@@ -306,23 +310,23 @@ static void draw_home(void)
                 goto outline;
             continue;
         }
-        /* ---- background 1: loop passes, ALTERNATING brightness ----
-         * Each pass is one full loop of this track, so the stripe pattern
-         * directly shows both loop LENGTH (how wide one stripe is) and
-         * POSITION (where the stripes break) on the shared time axis.
-         * Alternating 15% / 8% hue beats a 1px seam line: a restart always
-         * coincides with step 0, and step 0 usually holds a note, so a seam
-         * would be painted over by that note's block. Opacity alternation
-         * never collides and stays readable at any pass width. */
-        for (pass = 0; pass < npass; pass++) {
-            int x0 = HX0 + tx(pass * loop_ticks);
-            int xw = tx(loop_ticks);
-            if (x0 >= HX1)
-                break;
-            if (x0 + xw > HX1)
-                xw = HX1 - x0;
-            cv_rect(x0, y, xw, 11,
-                    blend(col, RGB565(29, 29, 38), (pass & 1) ? 255 : 200));
+        /* ---- background 1: the loop, drawn ONCE from t=0 (rev.23) ----
+         * John 2026-10-19: "不需要铺满hero —— hero 显示 4bar、trk len 8step@1/16
+         * 只占 2bar，hero 就应该只显示 2bar，后面暗色表示 loop 外".
+         *
+         * So the row is no longer tiled with loop repetitions. One loop = one
+         * bright band anchored at t=0; everything past it is "outside the
+         * loop" and gets a darker, hatched bed. Tiling made every track look
+         * equally busy at every zoom, and — the actual reason — it destroyed
+         * the reading of DRIFT: a repeated loop has no single restart point to
+         * slide against, so phase errors hid inside the repetition. With one
+         * band, the band's width IS the loop length and its right edge IS where
+         * the loop gives up on the window. */
+        cv_rect(HX0, y, lpx, 11,
+                blend(col, RGB565(29, 29, 38), 200));   /* in-loop: hue, 15% */
+        {   int x;
+            for (x = HX0 + lpx + ((lpx ? 1 : 0)); x < HX1; x += 4)
+                cv_rect(x, y, 1, 11, RGB565(36, 36, 45));  /* out-of-loop hatch */
         }
         /* ---- background 2: meter (beat 24 ticks, bar 96 ticks) ----
          * Global, identical on every row: this is the reference that makes
@@ -351,67 +355,80 @@ static void draw_home(void)
         }
         /* ---- background 3 removed: the alternating pass stripes already
          * show where a loop restarts (see background 1). ---- */
-        /* ---- notes: one drawing pass per loop repetition ---- */
-        for (pass = 0; pass < npass; pass++) {
-            int tbase = pass * loop_ticks;
-            if (tbase >= hxspan())
-                break;
-            for (s = 0; s < tr->loop_len; s++) {
-                uint8_t si = (uint8_t)((tr->loop_start + s) & 63);
-                ds_step *st = &tr->steps[si];
-                int x = HX0 + tx(tbase + (int)s * ct);
-                int rel_end = (int)tr->loop_len - (int)s;   /* steps left in pass */
-                if (x >= HX1)
-                    break;
-                if (!st->on || !st->nvoices)
-                    continue;
-                if (is_drum) {
-                    /* rev.14e: 9-lane instrument mini-lines, top->bottom
-                     * (NDRUM lanes: same order/colours as 03 §3 DRUM GRID) */
-                    /* mask must hold NDRUM bits: at 9 lanes a uint8_t loses
-                     * bit 8 (the 9th drum) silently — the SHK line simply
-                     * never appeared in the hero. */
-                    uint16_t mask = 0;
-                    uint8_t li, row = 0, vi;
-                    cv_rect(x, y, bw, 11, blend(col, RGB565(29, 29, 38), 205));
-                    for (vi = 0; vi < st->nvoices; vi++) {
-                        uint8_t d;
-                        for (d = 0; d < NDRUM; d++)
-                            if (st->v[vi].note == GM_DRUMS[d]) mask |= (uint16_t)(1u << d);
-                    }
-                    for (li = 0; li < NDRUM && row < 4; li++) {
-                        if (!(mask & (1u << li)))
-                            continue;
-                        cv_rect(x, y + 1 + row * 3, bw, 1, D_PAL[li]);
-                        row++;
-                    }
-                } else {
-                    /* melodic: four voices as four 1px lines, pitch-ascending
-                     * bottom->top, line color = hue12(note) (same pitch color
-                     * as the GRID). Line LENGTH = gate, so a sustained note is
-                     * literally a long line and staccato is a dot. */
-                    uint8_t vi;
-                    voices_sorted(t, si);
-                    for (vi = 0; vi < sort_n; vi++) {
-                        int gsteps, gpx, ly;
-                        uint8_t g = sort_vs[vi][2];
-                        uint16_t c = hue12(sort_vs[vi][0]);
-                        if (g == 0xFF)
-                            gsteps = next_event_run(t, si, tr->loop_len, tr->loop_start);
-                        else
-                            gsteps = g;
-                        if (gsteps > rel_end)          /* clamp at loop end */
-                            gsteps = rel_end;
-                        gpx = tx(gsteps * ct);
-                        if (gpx < 1)
-                            gpx = 1;
-                        if (x + gpx > HX1)
-                            gpx = HX1 - x;
-                        ly = y + 1 + (sort_n - 1 - vi) * 3;   /* high pitch on top */
-                        cv_rect(x, ly, gpx, 1,
-                                st->prob < 100 ? blend(c, RGB565(29, 29, 38), 115) : c);
-                    }
+        /* ---- notes: ONE pass, inside the band only (rev.23) ---- */
+        for (s = 0; s < tr->loop_len; s++) {
+            uint8_t si = (uint8_t)((tr->loop_start + s) & 63);
+            ds_step *st = &tr->steps[si];
+            int x = HX0 + tx((int)s * ct);
+            int rel_end = (int)tr->loop_len - (int)s;   /* steps left in loop */
+            if (x >= HX0 + lpx)
+                break;                       /* past the loop: nothing to draw */
+            if (!st->on || !st->nvoices)
+                continue;
+            if (is_drum) {
+                /* mask must hold NDRUM bits: at 9 lanes a uint8_t loses
+                 * bit 8 (the 9th drum) silently — the SHK line simply
+                 * never appeared in the hero. */
+                uint16_t mask = 0;
+                uint8_t li, row = 0, vi;
+                cv_rect(x, y, bw, 11, blend(col, RGB565(29, 29, 38), 205));
+                for (vi = 0; vi < st->nvoices; vi++) {
+                    uint8_t d;
+                    for (d = 0; d < NDRUM; d++)
+                        if (st->v[vi].note == GM_DRUMS[d]) mask |= (uint16_t)(1u << d);
                 }
+                for (li = 0; li < NDRUM && row < 4; li++) {
+                    if (!(mask & (1u << li)))
+                        continue;
+                    cv_rect(x, y + 1 + row * 3, bw, 1, D_PAL[li]);
+                    row++;
+                }
+            } else {
+            /* melodic: four voices as four 1px lines, pitch-ascending
+             * bottom->top, line color = hue12(note) (same pitch color
+             * as the GRID). Line LENGTH = gate, so a sustained note is
+             * literally a long line and staccato is a dot. */
+            uint8_t vi;
+            voices_sorted(t, si);
+            for (vi = 0; vi < sort_n; vi++) {
+                int gsteps, gpx, ly;
+                uint8_t g = sort_vs[vi][2];
+                uint16_t c = hue12(sort_vs[vi][0]);
+                if (g == 0xFF)
+                    gsteps = next_event_run(t, si, tr->loop_len, tr->loop_start);
+                else
+                    gsteps = g;
+                if (gsteps > rel_end)          /* clamp at loop end */
+                    gsteps = rel_end;
+                gpx = tx(gsteps * ct);
+                if (gpx < 1)
+                    gpx = 1;
+                if (x + gpx > HX0 + lpx)       /* gate stops at the loop edge */
+                    gpx = HX0 + lpx - x;
+                ly = y + 1 + (sort_n - 1 - vi) * 3;   /* high pitch on top */
+                cv_rect(x, ly, gpx, 1,
+                        st->prob < 100 ? blend(c, RGB565(29, 29, 38), 115) : c);
+            }
+        }
+        }
+        /* ---- the track's OWN playhead (rev.23) ----
+         * John: "这样每个trk都有自己的playhead，可以表现出drift".
+         * One global line can only say "this is where the shared clock is";
+         * polymorphic drift is a per-track fact — each loop wraps at its own
+         * length, so the rows must show where each one actually is. Because
+         * every row's time mapping is its own (cells of its own division,
+         * band of its own loop length) while the meter behind them is global,
+         * drift reads as playheads crossing the bar lines at different times.
+         * Position = steps into the loop + the sub-cell fraction, in ticks:
+         * the same clock the engine schedules from, so the line cannot lie
+         * about the audio. */
+        if (g.playing) {
+            int rel = (int)((g.pos16[t] + 64u - tr->loop_start) & 63u);
+            if (rel < (int)tr->loop_len) {
+                int ph = HX0 + tx((int)((double)rel * ct + g.frac16[t] * ct));
+                if (ph >= HX1)
+                    ph = HX1 - 1;
+                cv_rect(ph, y, 1, 11, C_WHITE);
             }
         }
 outline:
@@ -421,12 +438,6 @@ outline:
             cv_rect(HX0 - 1, y, 1, 11, RGB565(127, 217, 74));
             cv_rect(HX1, y, 1, 11, RGB565(127, 217, 74));
         }
-    }
-    /* ONE global playhead: every track shares this axis, so a single white
-     * line sweeps the grid and wraps once per zoom window. */
-    if (g.playing) {
-        int ph = (int)g.tick_acc % hxspan();
-        cv_rect(HX0 + tx(ph), 24, 1, 192, C_WHITE);
     }
     cv_blit(0, 0);
     ui_draw_footer();

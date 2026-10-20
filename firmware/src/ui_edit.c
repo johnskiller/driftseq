@@ -165,26 +165,24 @@ static void draw_arp(void)
         ds_bjorklund(n, k, pat);
     }
     /* ---- 64-step result strip: same ABSOLUTE TIME axis as the hero (rev.19),
-     * same zoom (rev.21). 64 steps of a 1/16 track = 384 ticks = the whole
-     * 192px span at x4, so the strip lines up 1:1 with the HOME hero; at other
-     * zooms it must follow tx() or the two views silently disagree about
-     * where the bar lines are. ---- */
+     * same zoom (rev.21) and same one-loop-only grammar (rev.23). 64 steps of a
+     * 1/16 track = 384 ticks = the whole 192px span at x4, so the strip lines
+     * up 1:1 with the HOME hero; at other zooms it must follow tx() or the two
+     * views silently disagree about where the bar lines are.
+     *
+     * rev.23: the strip used to tile the loop across the window. The hero no
+     * longer does, and the strip claims to be the SAME axis — repeating here
+     * while the hero shows a single band would make the two views disagree
+     * about how much time is on screen. One loop, then dark. */
     cv_rect(0, sy, 240, sh, TB_BG);
     cv_rect(sx, sy, sw, sh, RGB565(34, 34, 42));
     {   int ct = cell_ticks(tr->division);
         int bw = step_w(ct);
         int loop_ticks = (int)len * ct;
-        int npass = loop_ticks > 0 ? (hxspan() + loop_ticks - 1) / loop_ticks : 1;
-        int pass;
-        for (pass = 0; pass < npass; pass++) {       /* loop passes + seam */
-            int x0 = sx + tx(pass * loop_ticks);
-            int xw = tx(loop_ticks);
-            if (x0 >= sx + sw) break;
-            if (x0 + xw > sx + sw) xw = sx + sw - x0;
-            cv_rect(x0, sy, xw, sh, RGB565(42, 42, 51));
-            if (pass && xw >= 8)
-                cv_rect(x0, sy, 1, sh, RGB565(56, 56, 68));
-        }
+        int lpx = tx(loop_ticks);
+        if (lpx > sw) lpx = sw;
+        if (lpx > 0)
+            cv_rect(sx, sy, lpx, sh, RGB565(42, 42, 51));   /* in-loop bed */
         {   int k, bx = tx(24);                      /* meter, zoom-aware */
             int beats_per_bar = TPB / 24;
             if (bx >= 8) {
@@ -202,29 +200,28 @@ static void draw_arp(void)
                 }
             }
         }
-        for (pass = 0; pass < npass; pass++) {
-            int tbase = pass * loop_ticks;
-            if (tbase >= hxspan()) break;
-            for (i = 0; i < (int)len; i++) {
+        {   for (i = 0; i < (int)len; i++) {
                 uint8_t idx, on;
                 int px;
                 idx = (uint8_t)(((i % n) + n - rot % n) % n);
                 if (!pat[idx]) continue;
                 on = tr->steps[(start + i) & 63].on;
                 if (!on) continue;
-                px = sx + tx(tbase + i * ct);
-                if (px >= sx + sw) break;
+                px = sx + tx(i * ct);
+                if (px >= sx + lpx) break;
                 if (is_drum) {                       /* lane mini-lines */
-                    uint8_t vi, mask = 0, li, row = 0;
+                    uint16_t mask = 0;               /* 9 lanes need 9 bits */
+                    uint8_t vi, li, row = 0;
                     cv_rect(px, sy, bw, sh, blend(tcol, RGB565(24, 24, 32), 205));
                     for (vi = 0; vi < tr->steps[(start + i) & 63].nvoices; vi++) {
                         uint8_t d;
                         for (d = 0; d < NDRUM; d++)
-                            if (tr->steps[(start + i) & 63].v[vi].note == GM_DRUMS[d]) mask |= (uint8_t)(1u << d);
+                            if (tr->steps[(start + i) & 63].v[vi].note == GM_DRUMS[d])
+                                mask |= (uint16_t)(1u << d);
                     }
                     for (li = 0; li < NDRUM && row < 4; li++) {
                         if (!(mask & (1u << li))) continue;
-                        cv_rect(px, sy + 1 + row * 3, bw, 1, D_PAL[li % 11]);
+                        cv_rect(px, sy + 1 + row * 3, bw, 1, D_PAL[li]);
                         row++;
                     }
                 } else {
@@ -233,9 +230,13 @@ static void draw_arp(void)
             }
         }
     }
-    if (g.playing) {                                  /* global playhead on the same axis */
-        int ph = (int)g.tick_acc % hxspan();
-        cv_rect(sx + tx(ph), sy, 1, sh, C_WHITE);
+    if (g.playing) {                                  /* this track's own head */
+        int rel = (int)((g.pos16[sel_track] + 64u - start) & 63u);
+        if (rel < (int)len) {
+            int ph = sx + tx((int)((double)rel * cell_ticks(tr->division) +
+                                   g.frac16[sel_track] * cell_ticks(tr->division)));
+            cv_rect(ph, sy, 1, sh, C_WHITE);
+        }
     }
     cv_text(30, sy + 2, &FONT_T, "LOOP", RGB565(106, 106, 118));
     /* ---- ring: outer guide, ticks, pulses (disc + white core), north pin ---- */
