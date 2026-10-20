@@ -279,23 +279,67 @@ createMod().then((M) => {
     }
     btn(B_PLAY);
 
-    /* ---- 5. the zoom readout actually redraws ----
-     * Reading "x8" out of glyph pixels would need OCR, but the property that
-     * matters is weaker and testable: the readout band must CHANGE when the
-     * zoom changes. A readout wired to a stale variable would be byte-equal. */
+    /* ---- 5. the zoom readout says N BAR, and N tracks the zoom ----
+     * John 2026-10-20: "顶部直接写1 bar 4bar这样，明确表示目前hero显示出几个bar".
+     * The old detent label ("x4b") was read as "X2B" in the field, i.e. the
+     * unit was invisible. Two contracts now: (a) all four zooms render a
+     * DIFFERENT glyph signature (a stale variable would be byte-equal), and
+     * (b) the readout stays inside its column and cannot collide with the
+     * loop-start "S" readout at x=204 — the unit word made the string longer
+     * than the old two-character label, so its width is now a real risk. */
     const READOUT = (fb) => {
         let sig = '';
         for (let y = 2; y < 14; y++)
-            for (let x = 160; x < 192; x++) sig += px(fb, x, y) === '24,24,32' ? '.' : '#';
+            for (let x = 160; x < 200; x++) {
+                const c = px(fb, x, y).split(',').map(Number);
+                sig += (c[0] > 40 || c[1] > 40 || c[2] > 40) ? '#' : '.';
+            }
         return sig;
     };
+    const readoutInk = (fb) => {          /* rightmost inked column of the readout */
+        let last = -1;
+        for (let y = 3; y <= 12; y++)
+            for (let x = 160; x < 200; x++) {
+                const c = px(fb, x, y).split(',').map(Number);
+                if (c[0] > 40 || c[1] > 40 || c[2] > 40) last = Math.max(last, x);
+            }
+        return last;
+    };
     toHome();
-    setZoom(4);
-    const r4 = READOUT(frame());
-    setZoom(8);
-    const r8 = READOUT(frame());
-    check(r4.includes('#') && r4 !== r8,
-          'HOME: zoom readout repaints when the zoom changes');
+    const sigs = {};
+    for (const z of [1, 2, 4, 8]) {
+        setZoom(z);
+        const fb = frame();
+        sigs[z] = READOUT(fb);
+        check(sigs[z].includes('#'), 'HOME: zoom readout renders at x' + z);
+        check(readoutInk(fb) < 204,
+              'HOME: "' + z + ' BAR" clears the S readout at x=204',
+              'rightmost ink x=' + readoutInk(fb));
+    }
+    check(new Set([sigs[1], sigs[2], sigs[4], sigs[8]]).size === 4,
+          'HOME: all four zoom readouts differ (1/2/4/8 BAR)');
+
+    /* the ARP strip calls itself the same time axis as the hero, so it must
+     * not describe that axis in a different notation either (rev.25). */
+    {
+        const band = (fb, x0) => {
+            let s = '';
+            for (let y = 4; y < 13; y++)
+                for (let x = x0; x < x0 + 34; x++) {
+                    const c = px(fb, x, y).split(',').map(Number);
+                    s += (c[0] > 40 || c[1] > 40 || c[2] > 40) ? '#' : '.';
+                }
+            return s;
+        };
+        setZoom(4);
+        const homeBand = band(frame(), 168);      /* "4 BAR" on HOME */
+        btn(B_ARP);
+        const arpBand = band(frame(), 112);       /* same spot on ARP */
+        check(arpBand.includes('#'), 'ARP: zoom readout renders');
+        check(arpBand === homeBand,
+              'ARP: zoom readout uses the same "N BAR" string as HOME');
+        btn(B_SEQ);
+    }
 
     /* ---- 6. DIVISION lives on the GRID page (rev.22) ----
      * John: "DIV现在没有设定的方法，在grid screen设置比较好". Two contracts:

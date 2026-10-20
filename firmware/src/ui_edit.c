@@ -145,11 +145,21 @@ static void draw_arp(void)
 
     cv_begin(240, 224, C_BLACK);
     cv_rect(0, 0, 240, 16, TB_BG);
-    cv_text(6, 2, &FONT_T, txt_join("ARP TRK", txt_num(0, sel_track + 1)), TB_TX);
+    /* rev.25: topbar text sits at y=4 like HOME's. It was y=2 here — FONT_T is
+     * 8px tall, so inside a 16px bar y=4 is centred and y=2 is visibly high.
+     * Caught by the probe that compares the ARP readout band with HOME's
+     * pixel for pixel: same string, different baseline, so it failed. */
+    cv_text(6, 4, &FONT_T, txt_join("ARP TRK", txt_num(0, sel_track + 1)), TB_TX);
     /* zoom, same readout grammar as HOME: the strip below is the same time
-     * axis, so its scale must be readable here too (rev.21). */
-    cv_text(112, 2, &FONT_T, txt_join("x", txt_num(0, hero_bars)), RGB565(122, 122, 136));
-    cv_text(192, 2, &FONT_T, eu ? "*LINK" : "FREE", eu ? GREEN_OK : RGB565(106, 106, 118));
+     * axis, so its scale must be readable here too (rev.21). rev.25: same
+     * "N BAR" wording as HOME — two views of one axis must not describe the
+     * same span in two different notations. */
+    {   char *b = txt_next();
+        fmt_int(b, (int32_t)hero_bars);
+        strcpy_(txt_end(b), " BAR");
+        cv_text(112, 4, &FONT_T, b, RGB565(122, 122, 136));
+    }
+    cv_text(192, 4, &FONT_T, eu ? "*LINK" : "FREE", eu ? GREEN_OK : RGB565(106, 106, 118));
     if (!eu && k0 == 0 && n0 == 0) {                 /* fresh track: hint page */
         cv_text(70, 112, &FONT_XS, "K4 - generate", RGB565(85, 85, 95));
         cv_text(64, 202, &FONT_XS, "K -  N -  ROT -", RGB565(138, 138, 153));

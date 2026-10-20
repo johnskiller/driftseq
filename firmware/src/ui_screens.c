@@ -277,17 +277,16 @@ static void draw_home(void)
     }
     cv_text(204, 4, &FONT_T, txt_join("S", txt_num(0, TRK()->loop_start)),
             TRK()->mute ? MUTE_GRAY : GREEN_OK);
-    {   /* zoom readout: the window is 1/2/4/8 bars. "x4" alone reads as
-         * "four bars is the thing everything is measured in", which is
-         * exactly the assumption rev.24 removes (a 12- or 13-step loop is
-         * not measured in bars at all). Keep the detent label — the ladder
-         * is still bar-quantised — but hand over the actual span too, so the
-         * number on screen is the length of the window, not a claim about
-         * how the tracks inside it are divided. */
+    {   /* zoom readout: say how many BARS the window shows, in bars (rev.25).
+         * John: "顶部直接写1 bar 4bar这样，明确表示目前hero显示出几个bar".
+         * The old "x4b" was a detent label wearing a unit: nobody reads
+         * "x4b" as "four bars". The ladder is still 1/2/4/8, but the
+         * number is now the span itself. Lower case folds to upper case in
+         * FONT_T, so this prints as "4 BAR". Space before "BAR" keeps the
+         * digits and the unit from reading as one token. */
         char *b = txt_next();
-        strcpy_(b, "x");
-        fmt_int(txt_end(b), (int32_t)hero_bars);
-        strcpy_(txt_end(b), "b");
+        fmt_int(b, (int32_t)hero_bars);
+        strcpy_(txt_end(b), " BAR");
         cv_text(168, 4, &FONT_T, b, RGB565(122, 122, 136));
     }
     for (t = 0; t < 16; t++) {
