@@ -203,7 +203,8 @@ static void ui_draw_footer(void)
  * global clock. Each row now draws its own head at its own position, and
  * because the meter behind it stays global, drift reads as heads crossing the
  * bar lines at different moments. */
-#define TPB      96                        /* ticks per 4/4 bar @24 PPQ */
+/* TPB lives in ui_glue.c now: ui.c's LED ruler needs it too, and ui.c is
+ * included before this file. */
 #define HX0      47
 #define HXW      192                       /* bar area is always 192px wide */
 #define HX1      (HX0 + HXW)               /* 239, independent of zoom */

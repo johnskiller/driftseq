@@ -4,6 +4,11 @@
  * ui_input.c / ui_screens.c / ui_edit.c. libc's fmt_int comes from libc.c.
  * btn_role/enc_role live in ui.c (panel.c statics visible there). */
 
+/* musical grid (ui_screens.c and ui.c alike): 96 ticks per 4/4 bar @24 PPQ,
+ * so one beat = 24 ticks. Both the hero meter and the white-key LED ruler
+ * derive their spacing from this, which is why it is shared, not local. */
+#define TPB      96
+
 /* screens (ui_screens.c) */
 static void draw_home(void);
 static void draw_grid_melodic(void);
@@ -23,6 +28,11 @@ static void ui_home_encoder(uint8_t enc, int8_t det);
 static void ui_encoder(uint8_t enc, int8_t det);
 static void ui_button(uint8_t btn, uint8_t down, uint8_t released);
 static void panel_key_handler(uint8_t key, uint8_t down);
+static int  cell_ticks(uint8_t div);              /* ui_screens.c: ticks per step */
+static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *dimB);
+#ifndef DS_WEB_UI
+static void ui_leds_sync(void);                   /* ui.c: masks -> panel HAL */
+#endif
 static void panel_key_up(uint8_t key);
 static void ui_input_poll(void);
 static void ui_draw(void);

@@ -73,6 +73,8 @@ static void ui_input_poll(void) { }               /* no-op: events are push, not
 /* ---- the app layer (identical files to the firmware) ---- */
 /* ---- the app layer (identical files to the firmware) ---- */
 ds_state g;                                       /* engine global (host/driftseq.c defines it in the other TU) */
+/* LED masks, recomputed once per frame by ui_leds() (ui.c) */
+static uint32_t led_litK, led_dimK, led_litB, led_dimB;
 #if 0                                 /* libc.c memset/memcpy clash with real libc in wasm */
 #include "libc.c"                     /* fmt_int / fmt_fix (unity: once, first) */
 #else
@@ -101,6 +103,9 @@ void ds_ui_frame(double dt)
 {
     ds_tick(&g, dt);
     ui_draw();
+    /* LED state is derived once per frame, next to the paint that produced it,
+     * so the keys can never describe a screen that is no longer showing. */
+    ui_leds(&led_litK, &led_dimK, &led_litB, &led_dimB);
 }
 
 /* ---- exported: panel injection (logical ids; JS maps hardware/panel) ----
@@ -141,3 +146,15 @@ EMSCRIPTEN_KEEPALIVE
 uint32_t ds_web_out_len(void) { return g.out_len; }
 EMSCRIPTEN_KEEPALIVE
 void ds_web_out_clear(void) { g.out_len = 0; }
+
+/* ---- exported: panel LED masks (bit i = white key i = step-in-page) ----
+ * litK = the selected drum has a hit on that step; dimK = beat onset
+ * (1/5/9/13 at 1/16). Same grammar the hardware keybed shows (03 §2.3/§3). */
+EMSCRIPTEN_KEEPALIVE
+uint32_t ds_web_lit_k(void) { return led_litK; }
+EMSCRIPTEN_KEEPALIVE
+uint32_t ds_web_dim_k(void) { return led_dimK; }
+EMSCRIPTEN_KEEPALIVE
+uint32_t ds_web_lit_b(void) { return led_litB; }
+EMSCRIPTEN_KEEPALIVE
+uint32_t ds_web_dim_b(void) { return led_dimB; }

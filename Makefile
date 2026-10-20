@@ -38,12 +38,12 @@ wasm:
 # the UI module: app layer (painters/routing) + engine, ONE instance.
 # Fonts come from firmware/gen_font_pregen.h (Barlow, same as the FM-1).
 uiwasm:
-	$(EMCC) -O2 -Wall web/ui_web.c $(HOST_SRC) \
+	$(EMCC) -O2 -Wall -DDS_WEB_UI=1 web/ui_web.c $(HOST_SRC) \
 	  -Ifirmware -Ifirmware/src -Ihost \
 	  -o web/ui.js -s MODULARIZE=1 -s EXPORT_NAME=DriftUiModule \
 	  -s ALLOW_MEMORY_GROWTH=0 \
 	  -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]' \
-	  -s EXPORTED_FUNCTIONS='["_malloc","_free","_ds_ui_boot","_ds_ui_frame","_ds_web_btn","_ds_web_enc","_ds_web_key","_ds_web_fb","_ds_web_out","_ds_web_out_len","_ds_web_out_clear"]'
+	  -s EXPORTED_FUNCTIONS='["_malloc","_free","_ds_ui_boot","_ds_ui_frame","_ds_web_btn","_ds_web_enc","_ds_web_key","_ds_web_fb","_ds_web_out","_ds_web_out_len","_ds_web_out_clear","_ds_web_lit_k","_ds_web_dim_k","_ds_web_lit_b","_ds_web_dim_b"]'
 
 wasmtest: wasm
 	node web/wasmtest.mjs

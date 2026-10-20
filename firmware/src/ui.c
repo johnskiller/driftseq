@@ -268,3 +268,88 @@ static void ui_poll(void)
     ui_input_poll();
     ui_draw();
 }
+
+/* ---- LED state as a pure function of the UI (03 §2.3 / §3) ----
+ * John 2026-10-20: "drum grid中，选中的鼓，对应的鼓点没有点亮白键。理想情况下
+ * 可以用dim表示1，5，9，13，亮起白键表示这个step有鼓点".
+ *
+ * Nothing in the firmware ever fed UI state to the LEDs: leds.c holds a mirror
+ * of incoming MIDI notes only (midi_io.c leds_on_note), which is for a host
+ * driving the panel. The 16 white keys therefore showed whatever the last MIDI
+ * message said — normally nothing.
+ *
+ * Grammar (one bit per white key 0..15 = step-in-page, page follows cursor):
+ *   dim  = beat onset (1, 5, 9, 13 at 1/16) — a ruler for blind entry
+ *   lit  = the selected drum has a hit on that step
+ *   both = the key is a beat AND has a hit; lit wins (a hit is the louder fact)
+ *
+ * Beats are computed in TICKS, not steps: a beat is TPB/4 = 24 ticks, so at
+ * 1/8 a beat is 2 steps, at 1/8T it is 3, at 1/32 it is 8. Hardcoding "every
+ * 4th step" would put the ruler in the wrong place on three of the five
+ * divisions, which is worse than no ruler at all.
+ *
+ * Melodic tracks use the identical bit layout (03 §2.3: white key = that step
+ * is on), so the same function serves both — only "which voice counts" differs.
+ */
+static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *dimB)
+{
+    ds_track *tr = TRK();
+    uint8_t is_drum = (tr->channel == 9);
+    uint8_t page = cursor >> 4;
+    int ct = cell_ticks(tr->division);
+    int c;
+
+    *litK = *dimK = *litB = *dimB = 0;
+
+    for (c = 0; c < 16; c++) {
+        uint8_t s = (uint8_t)(page * 16 + c);
+        ds_step *st = &tr->steps[s];
+        int on = 0;
+
+        if (is_drum) {                       /* only the SELECTED drum lights up */
+            uint8_t vi;
+            for (vi = 0; vi < st->nvoices; vi++)
+                if (st->v[vi].note == GM_DRUMS[drum_sel]) on = 1;
+        } else {
+            on = st->on && st->nvoices > 0;  /* melodic: the step is voiced */
+        }
+
+        if (on) *litK |= 1u << c;
+        /* beat onset: 24 ticks = one beat in 4/4 (TPB = 96). At 1/16 (6 ticks
+         * per step) that is steps 0,4,8,12 — the 1,5,9,13 John asked for. */
+        if (((s * ct) % (TPB / 4)) == 0)
+            *dimK |= 1u << c;
+    }
+    /* One white key = one step of the CURRENT page (03 §2.3 "cursor 所在 16 格页
+     * 内映射"). Beats outside the page belong to keys that show other steps, so
+     * nothing extra is drawn. */
+
+    if (tr->mute)                    /* muted track: no hit LEDs, ruler stays */
+        *litK = 0;
+
+    /* button LEDs (only states that actually exist in v1 — REC is a momentary
+     * cursor-step toggle, not an armed mode, so it has no idle light) */
+    if (g.playing)   *litB |= 1u << B_PLAY;
+    if (focus_layer) *litB |= 1u << B_EDIT;
+}
+
+#ifndef DS_WEB_UI
+/* Push the masks above onto the physical panel. Key ids in the HAL are
+ * "button 0..13, note key 14..40": white key i (0..15) is note index i, which
+ * is HAL id 14+i. Writing every key every pass is cheap (11 columns x 4 rows of
+ * bit tests) and keeps this stateless. */
+static void ui_leds_sync(void)
+{
+    uint32_t litK, dimK, litB, dimB, i;
+    ui_leds(&litK, &dimK, &litB, &dimB);
+    fm1_led_dim_div = 4;                 /* steady, ~1/4 brightness (03 grammar) */
+    for (i = 0; i < 16u; i++) {
+        /* white key i IS step-in-page i: the page itself is chosen by cursor, so
+         * the mapping needs no offset (03 §2.3) */
+        fm1_led_key(14u + i, (litK >> i) & 1u);
+        fm1_led_key_dim(14u + i, (dimK >> i) & 1u);
+    }
+    for (i = 0; i < 14u; i++)
+        fm1_led_key(i, (litB >> i) & 1u);
+}
+#endif /* DS_WEB_UI */

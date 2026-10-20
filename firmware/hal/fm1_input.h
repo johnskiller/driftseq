@@ -350,3 +350,21 @@ static void fm1_led_key(uint32_t id, int on)
                     fm1_led[p] &= (uint8_t)~(1u << r);
             }
 }
+
+/* DIM LED of key id (same ids as fm1_led_key). The dim plane is lit on one scan
+ * frame in fm1_led_dim_div, so it reads as a steady fraction of full brightness
+ * — that is what makes a "ruler" LED (beat onsets 1/5/9/13) distinguishable from
+ * a hit at a glance, without stealing the full-bright channel that means "this
+ * step has a note". Requires fm1_led_dim_div != 0 (app_main sets it). */
+static void fm1_led_key_dim(uint32_t id, int on)
+{
+    uint32_t p, r;
+    for (p = 0; p < FM1_NCOL; p++)
+        for (r = 1; r < 5u; r++)
+            if (FM1_KEYMAP[r][p] == (int8_t)id) {
+                if (on)
+                    fm1_led_dim[p] |= (uint8_t)(1u << r);
+                else
+                    fm1_led_dim[p] &= (uint8_t)~(1u << r);
+            }
+}

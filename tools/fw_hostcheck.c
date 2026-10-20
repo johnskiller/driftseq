@@ -71,7 +71,10 @@ static int chord_name_result;
 #include "demo_pattern.c"
 ds_state g;
 
-/* ---- app layer, unity order ---- */
+/* ---- app layer, unity order ----
+ * DS_WEB_UI keeps ui.c's platform push (ui_leds_sync -> fm1_led_*) out of this
+ * build: hostcheck has no LED matrix, and the thing worth testing here is the
+ * pure ui_leds() mask, which is what both front-ends consume. */
 #include "../firmware/src/ui_glue.c"
 #include "../firmware/src/ui_tables.c"
 #include "../firmware/src/ui_text.c"
@@ -280,6 +283,47 @@ int main(void)
     CHECK(cursor == 20, "EDIT keys never advance cursor");
     panel_key_handler(4, 1);                /* same note again = delete */
     CHECK(TRK()->steps[20].nvoices == 1, "EDIT same-note deletes the voice");
+    /* 10d. LED grammar (rev.29, John: "可以用dim表示1，5，9，13，亮起白键表示这个
+     * step有鼓点"). ui_leds() is the single source both front-ends read, so the
+     * mask is testable without a screen or an LED matrix. */
+    {   uint32_t lk, dk, lb, db;
+        /* Start from the demo pattern, not from whatever the earlier key tests
+         * left behind: the first run of this block failed because trk0 had
+         * picked up stray kick voices from the drum-key section, so the mask
+         * described real data and the ASSERTION was wrong about the fixture.
+         * A LED test must own its fixture. */
+        ds_load_demo(&g);
+        ui_button(B_SEQ, 1, 0);
+        focus_layer = 0;
+        sel_track = 1;                      /* snare: E(12,5), loop_start = 4 */
+        cursor = 0;
+        drum_sel = 1;
+        ui_leds(&lk, &dk, &lb, &db);
+        CHECK(dk == 0x1111u, "LED ruler = beats 1/5/9/13 at DIV 1/16");
+        CHECK(lk == ((1u<<4)|(1u<<7)|(1u<<9)|(1u<<12)|(1u<<14)),
+              "LED lit = selected drum hits (snare abs slots 5,8,10,13,15)");
+        /* drum hits live on the track that holds them: kick is trk0, hats trk2.
+         * (Getting this wrong is exactly the bug class this test exists for —
+         * the LED must follow BOTH the selected track and the selected drum.) */
+        sel_track = 0; drum_sel = 0;        /* kick: E(16,4) sits ON the beat */
+        TRK()->mute = 0;                    /* earlier sections muted trk0 */
+        ui_leds(&lk, &dk, &lb, &db);
+        CHECK(lk == 0x1111u && dk == 0x1111u,
+              "LED kick 4-on-floor: lit and dim coincide on the beat");
+        /* mute must kill the hit LEDs but keep the ruler: a muted track still
+         * needs the beat reference to be re-armed while blind */
+        TRK()->mute = 1;
+        ui_leds(&lk, &dk, &lb, &db);
+        CHECK(lk == 0 && dk == 0x1111u, "LED mute: hits off, ruler stays");
+        TRK()->mute = 0;
+        sel_track = 2; drum_sel = 2;        /* hats E(8,3): offsets 1,4,7 */
+        ui_leds(&lk, &dk, &lb, &db);
+        CHECK(lk == ((1u<<0)|(1u<<3)|(1u<<6)),
+              "LED lit follows the drum switch (hats E(8,3))");
+        sel_track = 0;
+        drum_sel = 0;
+    }
+
     chord_name_test();
     CHECK(chord_name_result, "chord name single note + quality");
     focus_layer = 0;

@@ -486,6 +486,55 @@ createMod().then((M) => {
     check(footRest.includes('#') && footRest !== footGlo,
           'GRID: holding GLO swaps the footer to the modifier layer names');
 
+    /* ---- 8. white-key LED grammar (03 §3, John 2026-10-20) ----
+     * "drum grid中，选中的鼓，对应的鼓点没有点亮白键。理想情况下可以用dim表示
+     * 1，5，9，13，亮起白键表示这个step有鼓点"
+     *
+     * Two separate claims, both worth pinning:
+     *  (a) the ruler is BEAT-based, not "every 4th step" — it must land on 1/5/9/13
+     *      at 1/16 but on 1,3,5,... at 1/8, because a beat is 24 ticks either way;
+     *  (b) lit follows the SELECTED drum only (a white key shows one instrument).
+     * The demo gives a known answer: trk1 snare is E(12,5) with loop_start=4 ->
+     * absolute slots 5,8,10,13,15. Kick E(16,4) sits exactly on the beat, which
+     * is the case where lit and dim coincide and a sloppy implementation still
+     * looks right — so the snare, not the kick, is the real test. */
+    {
+        const bitsOf = (m) => {
+            const a = [];
+            for (let i = 0; i < 16; i++) if (m & (1 << i)) a.push(i + 1);
+            return a.join(',');
+        };
+        const BLACKK = [1, 3, 5, 8, 10, 13, 15, 17, 20];   /* drum 0..8 */
+        toHome();
+        M._ds_web_btn(9, 1); M._ds_web_btn(9, 0); frame(); /* SEQ = GRID */
+        M._ds_web_enc(0, 1); frame();                      /* SELECT -> trk2 snare */
+
+        check(bitsOf(M._ds_web_dim_k()) === '1,5,9,13',
+              'LED: the dim ruler marks beats 1/5/9/13 at DIV 1/16',
+              'got ' + bitsOf(M._ds_web_dim_k()));
+
+        M._ds_web_key(BLACKK[1], 1); M._ds_web_key(BLACKK[1], 0); frame();  /* SNR */
+        check(bitsOf(M._ds_web_lit_k()) === '5,8,10,13,15',
+              'LED: lit keys are the SELECTED drum hits (snare E(12,5) @start 4)',
+              'got ' + bitsOf(M._ds_web_lit_k()));
+
+        M._ds_web_key(BLACKK[2], 1); M._ds_web_key(BLACKK[2], 0); frame();  /* CHH */
+        check(bitsOf(M._ds_web_lit_k()) === '',
+              'LED: switching drum clears the previous drum hits',
+              'got ' + bitsOf(M._ds_web_lit_k()));
+
+        /* the ruler must follow the DIVISION, not a hardcoded stride of 4 */
+        M._ds_web_btn(5, 1); M._ds_web_enc(5, -1); M._ds_web_btn(5, 0); frame(); /* GLO+K3 -> 1/8T */
+        M._ds_web_btn(5, 1); M._ds_web_enc(5, -1); M._ds_web_btn(5, 0); frame(); /* -> 1/8 */
+        check(bitsOf(M._ds_web_dim_k()) === '1,3,5,7,9,11,13,15',
+              'LED: at DIV 1/8 the ruler is every 2 steps (a beat is still 24 ticks)',
+              'got ' + bitsOf(M._ds_web_dim_k()));
+        /* restore 1/16 so later sections see the demo's default */
+        M._ds_web_btn(5, 1); M._ds_web_enc(5, 1); M._ds_web_btn(5, 0); frame();
+        M._ds_web_btn(5, 1); M._ds_web_enc(5, 1); M._ds_web_btn(5, 0); frame();
+        M._ds_web_enc(0, -1); frame();                     /* SELECT back to trk1 */
+    }
+
     console.log(fails ? '== ' + fails + ' UI PROBE FAILURES ==' : 'UI PROBE OK');
     process.exit(fails ? 1 : 0);
 });

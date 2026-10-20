@@ -112,6 +112,7 @@ static void ds_main(void)
             last_tick = fm1_ms;
             ds_tick(&g, 0.001);
         }
+        ui_leds_sync();                              /* UI state -> panel LEDs */
         ds_flush_out();
         ds_drain_midi_in();
         usb_retry(fm1_ms);

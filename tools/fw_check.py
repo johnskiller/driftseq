@@ -11,7 +11,8 @@ INC = [os.path.join(ROOT, d) for d in ('host', 'firmware', 'firmware/src')]
 SRC = os.path.join(ROOT, 'tools', 'fw_hostcheck.c')
 OUT = '/tmp/ds_fw_hostcheck'
 
-r = subprocess.run(['gcc', '-Wall', '-O1', '-Werror=implicit-function-declaration']
+r = subprocess.run(['gcc', '-Wall', '-O1', '-Werror=implicit-function-declaration',
+                    '-DDS_WEB_UI=1']
                    + sum([['-I', d] for d in INC], [])
                    + [SRC, '-o', OUT], capture_output=True, text=True)
 if r.returncode:

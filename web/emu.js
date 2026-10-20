@@ -109,6 +109,10 @@ function frame(t){
     M._ds_ui_frame(dt);
     readMidiOut();
     blit();
+    /* panel LEDs come from the UI state, not from MIDI: keys must describe what
+     * the screen is showing right now (03 §2.3 / §3). */
+    DSPanel.drawLeds({litK:M._ds_web_lit_k(), dimK:M._ds_web_dim_k(),
+                      litB:M._ds_web_lit_b(), dimB:M._ds_web_dim_b()});
   }catch(e){ crashBeacon('frame: '+e.message); lastT=0; }
   rafId=requestAnimationFrame(frame);
 }
