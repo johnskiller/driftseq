@@ -287,7 +287,7 @@ static void ui_poll(void)
     ui_draw();
 }
 
-/* ---- LED state as a pure function of the UI (03 §2.3 / §3) ----
+/* ---- LED state as a pure function of the UI (03 §2.3 / §3.2) ----
  * John 2026-10-20: "drum grid中，选中的鼓，对应的鼓点没有点亮白键。理想情况下
  * 可以用dim表示1，5，9，13，亮起白键表示这个step有鼓点".
  *
@@ -296,18 +296,29 @@ static void ui_poll(void)
  * driving the panel. The 16 white keys therefore showed whatever the last MIDI
  * message said — normally nothing.
  *
- * Grammar (one bit per white key 0..15 = step-in-page, page follows cursor):
- *   dim  = beat onset (1, 5, 9, 13 at 1/16) — a ruler for blind entry
- *   lit  = the selected drum has a hit on that step
- *   both = the key is a beat AND has a hit; lit wins (a hit is the louder fact)
+ * Grammar — ONE BIT PER KEY ID (0..26), not per white ordinal, because the bed
+ * is a real piano and both consumers (panel.js keys[], FM-1 HAL note key i =
+ * id 14+i) address LEDs by id. The 16 step keys live at ids
+ * 0,2,4,6,7,9,11,12,14,16,18,19,21,23,24,26 with black keys between them.
+ *   dim(white)  = beat onset (1, 5, 9, 13 at 1/16) — a ruler for blind entry
+ *   lit(white)  = this step carries a hit OF THE SELECTED DRUM
+ *   lit(black)  = this black key IS the selected drum (the one fact the whites
+ *                 cannot express: they say "a hit here", never "which drum")
+ *   both        = the key is a beat AND has a hit; lit wins (louder fact)
  *
  * Beats are computed in TICKS, not steps: a beat is TPB/4 = 24 ticks, so at
  * 1/8 a beat is 2 steps, at 1/8T it is 3, at 1/32 it is 8. Hardcoding "every
  * 4th step" would put the ruler in the wrong place on three of the five
  * divisions, which is worse than no ruler at all.
  *
- * Melodic tracks use the identical bit layout (03 §2.3: white key = that step
- * is on), so the same function serves both — only "which voice counts" differs.
+ * NOT in this mask: the playhead flash (03 asks for "闪 = playhead"). The mask
+ * is a pure function of edit state, deliberately with no clock in it, so that
+ * tests can assert it; a flash has to be added by the front-end that owns a
+ * frame clock, keyed off g.pos16[sel_track]. Recorded as an open gap in
+ * 03 §3 rather than quietly implied.
+ *
+ * Melodic tracks use the identical layout (03 §2.3: white key = that step is
+ * on), so the same function serves both — only "which voice counts" differs.
  */
 static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *dimB)
 {
