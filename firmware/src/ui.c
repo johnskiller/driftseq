@@ -111,6 +111,24 @@ static uint8_t key_white_index(uint8_t key)        /* 0..15 = step-in-page */
         if (!KEY_IS_BLACK[i]) ord++;
     return ord;
 }
+/* The INVERSE maps, needed by the LED layer: masks are addressed by key ID
+ * (that is what panel.js and the FM-1 HAL shift by), but the model talks in
+ * ordinals (white 0..15 = step-in-page, black 0..10 = drum). Going the other
+ * way round is what lit the wrong keys. */
+static uint8_t key_white_id(uint8_t ord)           /* white ordinal -> key id */
+{
+    uint8_t i, n = 0;
+    for (i = 0; i < 27u; i++)
+        if (!KEY_IS_BLACK[i] && n++ == ord) return i;
+    return 0xFF;                                    /* beyond the bed */
+}
+static uint8_t key_black_id(uint8_t ord)           /* black ordinal -> key id */
+{
+    uint8_t i, n = 0;
+    for (i = 0; i < 27u; i++)
+        if (KEY_IS_BLACK[i] && n++ == ord) return i;
+    return 0xFF;
+}
 
 /* black-key ordinal -> drum lane; white key -> step-in-page.
  * r16j key dispatch (mode/focus aware):
@@ -305,6 +323,7 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
         uint8_t s = (uint8_t)(page * 16 + c);
         ds_step *st = &tr->steps[s];
         int on = 0;
+        uint8_t key;
 
         if (is_drum) {                       /* only the SELECTED drum lights up */
             uint8_t vi;
@@ -314,15 +333,34 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
             on = st->on && st->nvoices > 0;  /* melodic: the step is voiced */
         }
 
-        if (on) *litK |= 1u << c;
+        /* A white key's ID is NOT its ordinal: the bed is a real piano, so the
+         * 16 step keys are ids 0,2,4,6,7,9,11,12,... with black keys between
+         * them. panel.js and the HAL both address LEDs by key ID, so shifting
+         * by the ordinal lit the wrong physical keys (and on a real FM-1 the
+         * leftmost keys stayed dark). John: "亮的不对（估计是没考虑到黑键，
+         * 没有跳过黑键）". */
+        key = key_white_id((uint8_t)c);
+        if (key == 0xFF)
+            continue;
+        if (on) *litK |= 1u << key;
         /* beat onset: 24 ticks = one beat in 4/4 (TPB = 96). At 1/16 (6 ticks
          * per step) that is steps 0,4,8,12 — the 1,5,9,13 John asked for. */
         if (((s * ct) % (TPB / 4)) == 0)
-            *dimK |= 1u << c;
+            *dimK |= 1u << key;
     }
     /* One white key = one step of the CURRENT page (03 §2.3 "cursor 所在 16 格页
      * 内映射"). Beats outside the page belong to keys that show other steps, so
      * nothing extra is drawn. */
+
+    /* The selected drum's own black key lights up: John 2026-10-20 — "选择某个
+     * 黑键，那么这个黑键亮起，对应鼓点的白键亮起". Without this the panel gives no
+     * feedback about which instrument the white keys are currently describing,
+     * which is the one thing you cannot infer from the keys themselves. */
+    if (is_drum && drum_sel < NDRUM) {
+        uint8_t bk = key_black_id(drum_sel);   /* black ordinal -> key id */
+        if (bk != 0xFF)
+            *litK |= 1u << bk;
+    }
 
     if (tr->mute)                    /* muted track: no hit LEDs, ruler stays */
         *litK = 0;
@@ -343,9 +381,8 @@ static void ui_leds_sync(void)
     uint32_t litK, dimK, litB, dimB, i;
     ui_leds(&litK, &dimK, &litB, &dimB);
     fm1_led_dim_div = 4;                 /* steady, ~1/4 brightness (03 grammar) */
-    for (i = 0; i < 16u; i++) {
-        /* white key i IS step-in-page i: the page itself is chosen by cursor, so
-         * the mapping needs no offset (03 §2.3) */
+    for (i = 0; i < 27u; i++) {          /* all 27 key ids: white step keys AND
+                                          * the black key of the selected drum */
         fm1_led_key(14u + i, (litK >> i) & 1u);
         fm1_led_key_dim(14u + i, (dimK >> i) & 1u);
     }

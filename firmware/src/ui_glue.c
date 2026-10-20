@@ -41,6 +41,8 @@ static void ds_state_init(void);
 static void cursor_move(int8_t n);
 static uint8_t key_black_ordinal(uint8_t key);
 static uint8_t key_white_index(uint8_t key);
+static uint8_t key_white_id(uint8_t ord);
+static uint8_t key_black_id(uint8_t ord);
 
 /* text builders (ui_text.c) */
 static char *txt_next(void);

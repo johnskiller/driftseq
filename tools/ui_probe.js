@@ -499,9 +499,20 @@ createMod().then((M) => {
      * is the case where lit and dim coincide and a sloppy implementation still
      * looks right — so the snare, not the kick, is the real test. */
     {
+        /* Masks are addressed by KEY ID (0..26), not by white-key ordinal: the
+         * FM-1 bed is a real piano, so steps 0..15 live at ids
+         * 0,2,4,6,7,9,11,12,14,16,18,19,21,23,24,26 and black keys sit between
+         * them. Reporting ordinals here would hide exactly the bug John found
+         * ("亮的不对…没有跳过黑键"). */
+        const W = [0,2,4,6,7,9,11,12,14,16,18,19,21,23,24,26];
         const bitsOf = (m) => {
             const a = [];
-            for (let i = 0; i < 16; i++) if (m & (1 << i)) a.push(i + 1);
+            for (let i = 0; i < 27; i++) if (m & (1 << i)) a.push(i);
+            return a.join(',');
+        };
+        const stepsOf = (m) => {          /* which STEP ordinals are lit */
+            const a = [];
+            for (let i = 0; i < 16; i++) if (m & (1 << W[i])) a.push(i + 1);
             return a.join(',');
         };
         const BLACKK = [1, 3, 5, 8, 10, 13, 15, 17, 20];   /* drum 0..8 */
@@ -509,26 +520,36 @@ createMod().then((M) => {
         M._ds_web_btn(9, 1); M._ds_web_btn(9, 0); frame(); /* SEQ = GRID */
         M._ds_web_enc(0, 1); frame();                      /* SELECT -> trk2 snare */
 
-        check(bitsOf(M._ds_web_dim_k()) === '1,5,9,13',
+        check(stepsOf(M._ds_web_dim_k()) === '1,5,9,13',
               'LED: the dim ruler marks beats 1/5/9/13 at DIV 1/16',
-              'got ' + bitsOf(M._ds_web_dim_k()));
+              'got ' + stepsOf(M._ds_web_dim_k()));
+        /* the ruler must sit on the WHITE keys, i.e. every dim bit must be a
+         * white key id — a black key in the ruler means the ordinal/ID mixup
+         * is back */
+        check((M._ds_web_dim_k() & ~W.reduce((a, k) => a | (1 << k), 0)) === 0,
+              'LED: every dim bit lands on a WHITE key id',
+              'mask ' + bitsOf(M._ds_web_dim_k()));
 
         M._ds_web_key(BLACKK[1], 1); M._ds_web_key(BLACKK[1], 0); frame();  /* SNR */
-        check(bitsOf(M._ds_web_lit_k()) === '5,8,10,13,15',
+        check(stepsOf(M._ds_web_lit_k()) === '5,8,10,13,15',
               'LED: lit keys are the SELECTED drum hits (snare E(12,5) @start 4)',
-              'got ' + bitsOf(M._ds_web_lit_k()));
+              'got ' + stepsOf(M._ds_web_lit_k()));
+        /* ...and the drum's own black key lights: SNR = ordinal 1 = id 3 */
+        check((M._ds_web_lit_k() & (1 << 3)) !== 0,
+              'LED: the selected drum lights its own black key (SNR = G#3)',
+              'mask ' + bitsOf(M._ds_web_lit_k()));
 
         M._ds_web_key(BLACKK[2], 1); M._ds_web_key(BLACKK[2], 0); frame();  /* CHH */
-        check(bitsOf(M._ds_web_lit_k()) === '',
-              'LED: switching drum clears the previous drum hits',
-              'got ' + bitsOf(M._ds_web_lit_k()));
+        check(stepsOf(M._ds_web_lit_k()) === '' && (M._ds_web_lit_k() & (1 << 5)),
+              'LED: switching drum moves the black key and clears old hits',
+              'mask ' + bitsOf(M._ds_web_lit_k()));
 
         /* the ruler must follow the DIVISION, not a hardcoded stride of 4 */
         M._ds_web_btn(5, 1); M._ds_web_enc(5, -1); M._ds_web_btn(5, 0); frame(); /* GLO+K3 -> 1/8T */
         M._ds_web_btn(5, 1); M._ds_web_enc(5, -1); M._ds_web_btn(5, 0); frame(); /* -> 1/8 */
-        check(bitsOf(M._ds_web_dim_k()) === '1,3,5,7,9,11,13,15',
+        check(stepsOf(M._ds_web_dim_k()) === '1,3,5,7,9,11,13,15',
               'LED: at DIV 1/8 the ruler is every 2 steps (a beat is still 24 ticks)',
-              'got ' + bitsOf(M._ds_web_dim_k()));
+              'got ' + stepsOf(M._ds_web_dim_k()));
         /* restore 1/16 so later sections see the demo's default */
         M._ds_web_btn(5, 1); M._ds_web_enc(5, 1); M._ds_web_btn(5, 0); frame();
         M._ds_web_btn(5, 1); M._ds_web_enc(5, 1); M._ds_web_btn(5, 0); frame();

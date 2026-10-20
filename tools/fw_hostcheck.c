@@ -298,28 +298,51 @@ int main(void)
         sel_track = 1;                      /* snare: E(12,5), loop_start = 4 */
         cursor = 0;
         drum_sel = 1;
-        ui_leds(&lk, &dk, &lb, &db);
-        CHECK(dk == 0x1111u, "LED ruler = beats 1/5/9/13 at DIV 1/16");
-        CHECK(lk == ((1u<<4)|(1u<<7)|(1u<<9)|(1u<<12)|(1u<<14)),
-              "LED lit = selected drum hits (snare abs slots 5,8,10,13,15)");
-        /* drum hits live on the track that holds them: kick is trk0, hats trk2.
-         * (Getting this wrong is exactly the bug class this test exists for —
-         * the LED must follow BOTH the selected track and the selected drum.) */
-        sel_track = 0; drum_sel = 0;        /* kick: E(16,4) sits ON the beat */
-        TRK()->mute = 0;                    /* earlier sections muted trk0 */
-        ui_leds(&lk, &dk, &lb, &db);
-        CHECK(lk == 0x1111u && dk == 0x1111u,
-              "LED kick 4-on-floor: lit and dim coincide on the beat");
-        /* mute must kill the hit LEDs but keep the ruler: a muted track still
-         * needs the beat reference to be re-armed while blind */
-        TRK()->mute = 1;
-        ui_leds(&lk, &dk, &lb, &db);
-        CHECK(lk == 0 && dk == 0x1111u, "LED mute: hits off, ruler stays");
-        TRK()->mute = 0;
-        sel_track = 2; drum_sel = 2;        /* hats E(8,3): offsets 1,4,7 */
-        ui_leds(&lk, &dk, &lb, &db);
-        CHECK(lk == ((1u<<0)|(1u<<3)|(1u<<6)),
-              "LED lit follows the drum switch (hats E(8,3))");
+        /* Masks are addressed by KEY ID, not by white ordinal: the bed is a real
+         * piano, so steps 0..15 live at ids 0,2,4,6,7,9,11,12,14,16,18,19,21,
+         * 23,24,26 and the black keys sit between them. Testing the ordinal
+         * encoding is what let the first version pass while lighting the wrong
+         * physical keys (John: "亮的不对…没有跳过黑键"). */
+        {   static const uint8_t W[16] = {0,2,4,6,7,9,11,12,14,16,18,19,21,23,24,26};
+            uint32_t ruler = 0, snare = 0, i;
+            for (i = 0; i < 16; i++) if (i % 4 == 0) ruler |= 1u << W[i];
+            for (i = 0; i < 16; i++) if (i==4||i==7||i==9||i==12||i==14) snare |= 1u << W[i];
+            ui_leds(&lk, &dk, &lb, &db);
+            CHECK(dk == ruler, "LED ruler = beats 1/5/9/13 on WHITE key ids");
+            CHECK((lk & ~(1u << 3)) == snare,
+                  "LED lit = selected drum hits on WHITE key ids (snare 5,8,10,13,15)");
+            /* John: "选择某个黑键，那么这个黑键亮起". Black ordinals sit at ids
+             * 1,3,5,8,10,...: drum 0 = F#3 (id 1), drum 1 (SNR) = G#3 (id 3),
+             * drum 2 (CHH) = A#3 (id 5). */
+            CHECK(lk == (snare | (1u << 3)),
+                  "LED: the SELECTED drum's black key lights up (SNR = G#3)");
+
+            /* drum hits live on the track that holds them: kick is trk0, hats trk2.
+             * (Getting this wrong is exactly the bug class this test exists for —
+             * the LED must follow BOTH the selected track and the selected drum.) */
+            sel_track = 0; drum_sel = 0;    /* kick: E(16,4) sits ON the beat */
+            TRK()->mute = 0;                /* earlier sections muted trk0 */
+            ui_leds(&lk, &dk, &lb, &db);
+            CHECK((lk & ~(1u << 1)) == ruler && dk == ruler,
+                  "LED kick 4-on-floor: lit and dim coincide on the beat");
+            CHECK(lk & (1u << 1), "LED: kick (ordinal 0) lights black key id 1");
+        }
+        /* mute must kill the hit LEDs (including the selected drum's black key)
+         * but keep the ruler: a muted track still needs the beat reference */
+        {   static const uint8_t W[16] = {0,2,4,6,7,9,11,12,14,16,18,19,21,23,24,26};
+            uint32_t ruler = 0, hats = 0, i;
+            for (i = 0; i < 16; i++) if (i % 4 == 0) ruler |= 1u << W[i];
+            for (i = 0; i < 16; i++) if (i==0||i==3||i==6) hats |= 1u << W[i];
+            TRK()->mute = 1;
+            ui_leds(&lk, &dk, &lb, &db);
+            CHECK(lk == 0 && dk == ruler, "LED mute: hits off, ruler stays");
+            TRK()->mute = 0;
+            sel_track = 2; drum_sel = 2;    /* hats E(8,3): offsets 1,4,7 */
+            ui_leds(&lk, &dk, &lb, &db);
+            /* CHH is black ordinal 2 -> key id 5 (A#3) */
+            CHECK(lk == (hats | (1u << 5)),
+                  "LED lit follows the drum switch (hats E(8,3) + A#3)");
+        }
         sel_track = 0;
         drum_sel = 0;
     }
