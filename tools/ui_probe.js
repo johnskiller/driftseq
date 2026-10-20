@@ -26,9 +26,12 @@ const B_FX = 0, B_SEL = 1, B_ENV = 2, B_LFO = 3, B_EDIT = 4, B_GLO = 5,
 const EN_SELECT = 0, EN_ALGO = 1, EN_PRESET = 2, EN_K1 = 3, EN_K2 = 4,
       EN_K3 = 5, EN_K4 = 6;
 
-/* painter colours (ui_screens.c) */
-const BAR_LINE = '64,64,72';        /* meter: bar line   RGB565(64,64,78) */
-const BEAT_LINE = '40,44,48';       /* meter: beat line  RGB565(44,44,54) */
+/* painter colours (ui_screens.c) — RGB565-quantised as px() reports them.
+ * rev.24 dimmed the meter below the loop band: the bar grid is now CONTEXT
+ * (where am I in the bar), not the ruler loops are measured against — a
+ * 12-step loop is 0.75 bar and never lands on a bar line at all. */
+const BAR_LINE = '40,40,48';        /* meter: bar line   RGB565(42,42,52) */
+const BEAT_LINE = '32,32,40';       /* meter: beat line  RGB565(34,34,42) */
 
 let fails = 0;
 function check(cond, msg, detail) {
@@ -198,6 +201,45 @@ createMod().then((M) => {
         const widest = Math.max(...perRow.map((r) => r.band + r.out));
         check(widest <= 193, 'HERO: no row is tiled past the window',
               'widest row=' + widest + 'px of 192');
+    }
+
+    /* ---- 4b2. the loop edge is the row's own ruler (rev.24) ----
+     * John: "如果是12step的trk呢？所以不强调对齐bar / 甚至是13step". A 12-step
+     * 1/16 loop is 0.75 bar; 13 steps is 0.8125 bar. Neither lands on a bar
+     * line, so the bar grid must not be the brightest thing on the row — the
+     * loop edge must be. Assert both halves: the edge exists at the exact
+     * length, and it is BRIGHTER than any bar line on that row. */
+    {
+        const setLen = (len) => {
+            for (let i = 0; i < 70; i++) M._ds_web_enc(EN_K2, -1);   /* clamp to 1 */
+            for (let i = 0; i < len - 1; i++) M._ds_web_enc(EN_K2, 1);
+            return frame();
+        };
+        /* the track hue at full saturation vs the dim meter */
+        const lum = (c) => { const p = c.split(',').map(Number); return p[0] + p[1] + p[2]; };
+        for (const len of [12, 13]) {
+            toHome();
+            setZoom(4);
+            const f = setLen(len);
+            const y = 24 + 5;                       /* trk1, inside a row */
+            const wantX = 47 + Math.floor(len * 6 * 192 / 384);   /* tx(len*ct) */
+            /* find the brightest pixel in the row = the loop edge */
+            let bestX = -1, bestL = -1;
+            for (let x = 47; x < 239; x++) {
+                const L = lum(px(f, x, y));
+                if (L > bestL) { bestL = L; bestX = x; }
+            }
+            check(Math.abs(bestX - wantX) <= 2,
+                  'HERO: ' + len + '-step loop edge lands at its real length',
+                  'edge at ' + bestX + ', expected ~' + wantX);
+            /* a bar line must be dimmer than that edge */
+            const barAt = lum(px(f, 47 + 48, y));    /* first bar line at x4 */
+            check(bestL > barAt,
+                  'HERO: ' + len + '-step loop edge outranks the bar line',
+                  'edge lum=' + bestL + ' vs bar lum=' + barAt);
+        }
+        toHome();
+        setLen(16);
     }
 
     /* ---- 4c. every track draws its OWN playhead (rev.23) ----

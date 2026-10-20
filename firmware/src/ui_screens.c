@@ -277,12 +277,17 @@ static void draw_home(void)
     }
     cv_text(204, 4, &FONT_T, txt_join("S", txt_num(0, TRK()->loop_start)),
             TRK()->mute ? MUTE_GRAY : GREEN_OK);
-    {   /* zoom readout: the window is 1/2/4/8 bars; "x4" tells the user how
-         * much time the 192px bar area covers, so a loop's on-screen width is
-         * never mistaken for its real length. */
+    {   /* zoom readout: the window is 1/2/4/8 bars. "x4" alone reads as
+         * "four bars is the thing everything is measured in", which is
+         * exactly the assumption rev.24 removes (a 12- or 13-step loop is
+         * not measured in bars at all). Keep the detent label — the ladder
+         * is still bar-quantised — but hand over the actual span too, so the
+         * number on screen is the length of the window, not a claim about
+         * how the tracks inside it are divided. */
         char *b = txt_next();
         strcpy_(b, "x");
         fmt_int(txt_end(b), (int32_t)hero_bars);
+        strcpy_(txt_end(b), "b");
         cv_text(168, 4, &FONT_T, b, RGB565(122, 122, 136));
     }
     for (t = 0; t < 16; t++) {
@@ -328,12 +333,33 @@ static void draw_home(void)
             for (x = HX0 + lpx + ((lpx ? 1 : 0)); x < HX1; x += 4)
                 cv_rect(x, y, 1, 11, RGB565(36, 36, 45));  /* out-of-loop hatch */
         }
-        /* ---- background 2: meter (beat 24 ticks, bar 96 ticks) ----
-         * Global, identical on every row: this is the reference that makes
-         * "12-step 1/8 restarts mid-bar" readable at a glance. Beat spacing
-         * follows the zoom, so at 1 bar a beat is 48px and at 8 bars 6px —
-         * below 8px the beat lines stop being drawn (they become a comb and
-         * the bar lines alone carry the metric). */
+        /* ---- the loop edge: THIS track's ruler (rev.24) ----
+         * John: "如果是12step的trk呢？所以不强调对齐bar / 甚至是13step".
+         * At 1/16 a 12-step loop is 0.75 bar and a 13-step loop is 0.8125 bar —
+         * they never land on a bar line, and a 13-step loop never lands on the
+         * same place twice within a pattern. Drawing the bar grid as the
+         * brightest thing on the row told the user the opposite: it implied
+         * every loop is measured in bars. It is not, that is the whole point of
+         * polymeter.
+         *
+         * So the row gets its own authoritative tick: a 2px full-saturation
+         * line in the track's hue at the exact loop length. The bar grid stays
+         * as CONTEXT but drops below everything else in brightness — it answers
+         * "where am I in the bar", not "where does this loop end". Those are
+         * different questions and only the second one is per-track. */
+        if (lpx > 0 && lpx < HXW)
+            cv_rect(HX0 + lpx - 1, y, 2, 11, col);
+        /* ---- background 2: meter (beat 24 ticks, bar 96 ticks)
+         * CONTEXT, not ruler (rev.24). John's point about 12- and 13-step
+         * loops: a loop that is 0.75 or 0.8125 bars long never lands on a bar
+         * line, so the bar grid cannot be the thing the eye measures loops
+         * against — it only answers "where am I in the bar".
+         * It therefore sits BELOW the loop band in brightness: a bar line is
+         * now dimmer than the bed it crosses, so the band and its edge tick
+         * stay the loudest thing on the row. Beat spacing follows the zoom, so
+         * at 1 bar a beat is 48px and at 8 bars 6px — below 8px the beat lines
+         * stop being drawn (they become a comb and the bar lines alone carry
+         * the metric). */
         {   int k, bx = tx(24);
             int beats_per_bar = TPB / 24;            /* 4 in 4/4 */
             if (bx >= 8) {
@@ -342,14 +368,14 @@ static void draw_home(void)
                     if (x >= HX1)
                         break;
                     cv_rect(x, y, 1, 11,
-                            (k % beats_per_bar) ? RGB565(44, 44, 54) : RGB565(64, 64, 78));
+                            (k % beats_per_bar) ? RGB565(34, 34, 42) : RGB565(42, 42, 52));
                 }
             } else {                                 /* 8-bar: bar lines only */
                 for (k = 0; k <= (int)hero_bars; k++) {
                     int x = HX0 + tx(k * TPB);
                     if (x >= HX1)
                         break;
-                    cv_rect(x, y, 1, 11, RGB565(64, 64, 78));
+                    cv_rect(x, y, 1, 11, RGB565(42, 42, 52));
                 }
             }
         }
