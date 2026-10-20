@@ -298,6 +298,24 @@ static void draw_home(void)
         int ct = cell_ticks(tr->division);       /* ticks per step (12/8/6/4/3) */
         int loop_ticks = (int)tr->loop_len * ct; /* window length */
         int bw = step_w(ct);                     /* block width, 1px floor */
+        /* pitch range of the whole track (rev.27): the hero row is a pitch
+         * axis, so it needs the same pmin/pmax the GRID computes. Scanned once
+         * per row per frame — 64 steps x <=4 voices, and only for melodic. */
+        uint8_t pmin = 127, pmax = 0;
+        if (!is_drum) {
+            int r;
+            for (r = 0; r < 64; r++) {
+                uint8_t vi;
+                for (vi = 0; vi < tr->steps[r].nvoices; vi++) {
+                    uint8_t n = tr->steps[r].v[vi].note;
+                    if (n == 0xFF)
+                        continue;
+                    if (n < pmin) pmin = n;
+                    if (n > pmax) pmax = n;
+                }
+            }
+            if (pmin > pmax) { pmin = 48; pmax = 72; }   /* empty track */
+        }
         /* ---- the loop window on the ABSOLUTE step axis (rev.26) ----
          * The window is [loop_start, +loop_len) mod 64 (01 §2), so on screen it
          * starts at loop_start, not at 0. rev.23 drew it at 0 and put a note at
@@ -431,14 +449,26 @@ static void draw_home(void)
                     row++;
                 }
             } else {
-            /* melodic: four voices as four 1px lines, pitch-ascending
-             * bottom->top, line color = hue12(note) (same pitch color
-             * as the GRID). Line LENGTH = gate, so a sustained note is
-             * literally a long line and staccato is a dot. */
+            /* melodic: pitch maps VERTICALLY, same normalisation as the GRID
+             * (rev.27). John 2026-10-20: "按音高画（像 GRID）：在整条轨的音域内
+             * 做 pmin/pmax 映射，音高高低在 hero 上一眼可见".
+             *
+             * The old code stacked voices by their index in the sorted chord
+             * ((sort_n-1-vi)*3), which put every single-note step on the SAME
+             * row — demo trk5 spans C5/E5/G5/C6, three octaves, and all four
+             * drew at dy=1. Index-into-chord is a fact about how many notes a
+             * step holds, not about pitch, so the row carried no melodic
+             * information at all.
+             *
+             * Now the row is a pitch axis: pmin..pmax of the whole track maps
+             * to the 11px band, high on top. Same pmin/pmax scan and same
+             * rounding as draw_grid_melodic(), so a note sits at the same
+             * relative height on both screens. Line length is still the gate,
+             * colour is still hue12(note). */
             uint8_t vi;
             voices_sorted(t, si);
             for (vi = 0; vi < sort_n; vi++) {
-                int gsteps, gpx, ly;
+                int gsteps, gpx, ly, frac;
                 uint8_t g = sort_vs[vi][2];
                 uint16_t c = hue12(sort_vs[vi][0]);
                 if (g == 0xFF)
@@ -452,7 +482,15 @@ static void draw_home(void)
                     gpx = 1;
                 if (x + gpx > HX0 + wpx)       /* gate stops at the window edge */
                     gpx = HX0 + wpx - x;
-                ly = y + 1 + (sort_n - 1 - vi) * 3;   /* high pitch on top */
+                /* pitch -> row y: 9 usable scanlines inside the 11px band,
+                 * same span/rounding as the GRID's cell mapping */
+                frac = pmax > pmin
+                     ? ((int)sort_vs[vi][0] - (int)pmin) * 256 / ((int)pmax - (int)pmin)
+                     : 128;
+                if (frac < 0) frac = 0;
+                if (frac > 256) frac = 256;
+                ly = y + 1 + ((256 - frac) * 9 + 128) / 256;
+                if (ly > y + 10) ly = y + 10;
                 cv_rect(x, ly, gpx, 1,
                         st->prob < 100 ? blend(c, RGB565(29, 29, 38), 115) : c);
             }

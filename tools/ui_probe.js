@@ -290,6 +290,48 @@ createMod().then((M) => {
         }
     }
 
+    /* ---- 4b4. melodic rows encode PITCH vertically (rev.27) ----
+     * John: "melody trk 还没有修复". Positions and gates were already right;
+     * the row was not. The old code stacked voices by their index in the
+     * sorted chord, so every single-note step landed on the SAME scanline:
+     * demo trk5 spans C5/E5/G5/C6 — three octaves — and all four drew at
+     * dy=1. The row now maps pmin..pmax across the 11px band, same
+     * normalisation as the GRID, so low pitch = lower line. */
+    {
+        toHome();
+        setZoom(4);
+        const f = frame();
+        /* a voice line is a SATURATED hue12 colour; the in-loop band is a 15%
+         * hue tint (~[32,68,56]) and the bed is dark. Require a clear chroma
+         * spread so the band itself is never mistaken for a note. */
+        const band = (x0, len, yTop) => {
+            for (let dy = 1; dy <= 10; dy++) {
+                for (let x = x0; x < x0 + len; x++) {
+                    const p = px(f, x, yTop + dy).split(',').map(Number);
+                    const mx = Math.max(p[0], p[1], p[2]), mn = Math.min(p[0], p[1], p[2]);
+                    if (mx > 110 && mx - mn > 60) return dy;
+                }
+            }
+            return -1;
+        };
+        /* trk5 (row index 4): C5@0, E5@3, G5@6, C6@11 (C6 prob=55, dimmer) */
+        const yTop5 = 24 + 4 * 12;
+        const dy0 = band(HX0, 2, yTop5);          /* C5, lowest */
+        const dy3 = band(HX0 + 9, 2, yTop5);      /* E5  x=47+tx(18)=56 */
+        const dy6 = band(HX0 + 18, 2, yTop5);     /* G5  x=47+tx(36)=65 */
+        check(dy0 > dy3 && dy3 > dy6,
+              'HERO: melodic pitch rises upward (C5 < E5 < G5)',
+              'dy C5=' + dy0 + ' E5=' + dy3 + ' G5=' + dy6);
+        /* trk4 (row index 3): C2@0, D#2@6, G2@10 */
+        const yTop4 = 24 + 3 * 12;
+        const b0 = band(HX0, 2, yTop4);
+        const b6 = band(HX0 + 18, 2, yTop4);
+        const b10 = band(HX0 + 30, 2, yTop4);
+        check(b0 > b6 && b6 > b10,
+              'HERO: melodic pitch rises upward (C2 < D#2 < G2)',
+              'dy C2=' + b0 + ' D#2=' + b6 + ' G2=' + b10);
+    }
+
     /* ---- 4c. every track draws its OWN playhead (rev.23) ----
      * John: "这样每个trk都有自己的playhead，可以表现出drift". With loops of
      * different lengths running off one clock, the heads must NOT all sit in
