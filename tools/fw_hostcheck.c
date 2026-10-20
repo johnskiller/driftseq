@@ -270,6 +270,13 @@ int main(void)
     cursor = 20;
     panel_key_handler(4, 1);                /* key 4 = note 57 (A3) */
     CHECK(TRK()->steps[20].nvoices == 2, "EDIT key adds a voice");
+    /* rev.28: a newly written voice holds ONE step, not four. Spec 01 §2 and
+     * 03 §3 both say "vel 100 / gate 1". gate=4 meant a note on step 1 at
+     * DIV 1/16 sustained for a whole beat (4 x 1/16), and the hero faithfully
+     * drew a beat-long line — John: "在hero上，第一个beat都有横线". The hero was
+     * right; the default was wrong. */
+    CHECK(TRK()->steps[20].v[1].gate == 1,
+          "EDIT-added voice defaults to gate 1 (one step)");
     CHECK(cursor == 20, "EDIT keys never advance cursor");
     panel_key_handler(4, 1);                /* same note again = delete */
     CHECK(TRK()->steps[20].nvoices == 1, "EDIT same-note deletes the voice");

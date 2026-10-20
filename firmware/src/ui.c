@@ -201,7 +201,7 @@ static void panel_key_handler(uint8_t key, uint8_t down)
 
 /* EDIT layer keys (r16j editKeyHandler, rev.14a): cursor NEVER advances.
  * Any key = that note on the cursor step: same note = delete the voice,
- * else add (vel 100, gate 4); full step -> replace the highest note.
+ * else add (vel 100, gate 1); full step -> replace the highest note.
  * Drums map through GM_DRUMS (black = lane note; white = KEY_WHITE ordinal). */
 static void edit_key_handler(uint8_t key, uint8_t down)
 {
@@ -234,12 +234,18 @@ static void edit_key_handler(uint8_t key, uint8_t down)
             return;
         }
         if (st->nvoices < 4) {
-            ds_voice_add(tr, cursor, (uint8_t)note, 100, 4);
+            /* gate 1 step, not 4 (rev.28). 01 §2 + 03 §3 both specify the
+             * default voice as "vel 100 / gate 1". Hardcoding 4 meant a note
+             * written on step 1 at DIV 1/16 held for 4 steps = a whole beat,
+             * so the hero drew a line across the entire 1/4 note for what the
+             * user heard (and intended) as a single 1/16 hit. The hero was
+             * telling the truth about the data; the data was wrong. */
+            ds_voice_add(tr, cursor, (uint8_t)note, 100, 1);
             edit_voice = (uint8_t)(st->nvoices - 1);       /* new voice active */
         } else {                                           /* full: replace highest */
             voices_sorted(sel_track, cursor);
             ds_voice_remove(tr, cursor, sort_vs[3][0]);
-            ds_voice_add(tr, cursor, (uint8_t)note, 100, 4);
+            ds_voice_add(tr, cursor, (uint8_t)note, 100, 1);
             edit_voice = 3;
         }
         st->on = 1;
