@@ -296,12 +296,26 @@ static void draw_home(void)
         uint8_t muted = tr->mute;
         uint8_t is_drum = (tr->channel == 9);
         int ct = cell_ticks(tr->division);       /* ticks per step (12/8/6/4/3) */
-        int loop_ticks = (int)tr->loop_len * ct; /* one full window pass */
+        int loop_ticks = (int)tr->loop_len * ct; /* window length */
         int bw = step_w(ct);                     /* block width, 1px floor */
-        int lpx = tx(loop_ticks);                /* loop length in px (rev.23) */
+        /* ---- the loop window on the ABSOLUTE step axis (rev.26) ----
+         * The window is [loop_start, +loop_len) mod 64 (01 §2), so on screen it
+         * starts at loop_start, not at 0. rev.23 drew it at 0 and put a note at
+         * loop_start*screen-relative position instead — which made a 12-step
+         * track with loop_start=4 show its first 4 slots empty and everything
+         * shifted right by 4, disagreeing with the GRID by exactly loop_start
+         * cells. John: "都是hero画面有问题，grid画面正常" — the GRID was right:
+         * it draws absolute slot indices.
+         * Spec 03 §1.1 also says turning K1 moves "亮带整体平移" — the band
+         * shifts, the notes stay put. That is only true on absolute axes. */
+        int bpx = tx((int)tr->loop_start * ct);  /* window start, px */
+        int lpx = tx(loop_ticks);                /* window width, px */
+        int wpx = bpx + lpx;                     /* window end, px */
         uint8_t s;
         if (lpx > HXW)
             lpx = HXW;
+        if (wpx > HXW)
+            wpx = HXW;
         /* gutter (46px): TRK nn | LEN nn | route | M */
         cv_text(2, y, &FONT_T, txt_num(0, t + 1), muted ? MUTE_GRAY : RGB565(154, 154, 168));
         cv_text(15, y, &FONT_T, txt_num(0, tr->loop_len), muted ? RGB565(74, 74, 82) : RGB565(106, 106, 120));
@@ -326,11 +340,15 @@ static void draw_home(void)
          * slide against, so phase errors hid inside the repetition. With one
          * band, the band's width IS the loop length and its right edge IS where
          * the loop gives up on the window. */
-        cv_rect(HX0, y, lpx, 11,
+        cv_rect(HX0 + bpx, y, lpx, 11,
                 blend(col, RGB565(29, 29, 38), 200));   /* in-loop: hue, 15% */
         {   int x;
-            for (x = HX0 + lpx + ((lpx ? 1 : 0)); x < HX1; x += 4)
-                cv_rect(x, y, 1, 11, RGB565(36, 36, 45));  /* out-of-loop hatch */
+            /* hatching both BEFORE the window and AFTER it: on an absolute
+             * axis the out-of-loop area can be on either side (loop_start>0). */
+            for (x = HX0; x < HX0 + bpx; x += 4)
+                cv_rect(x, y, 1, 11, RGB565(36, 36, 45));
+            for (x = HX0 + wpx + ((wpx ? 1 : 0)); x < HX1; x += 4)
+                cv_rect(x, y, 1, 11, RGB565(36, 36, 45));
         }
         /* ---- the loop edge: THIS track's ruler (rev.24) ----
          * John: "如果是12step的trk呢？所以不强调对齐bar / 甚至是13step".
@@ -346,8 +364,8 @@ static void draw_home(void)
          * as CONTEXT but drops below everything else in brightness — it answers
          * "where am I in the bar", not "where does this loop end". Those are
          * different questions and only the second one is per-track. */
-        if (lpx > 0 && lpx < HXW)
-            cv_rect(HX0 + lpx - 1, y, 2, 11, col);
+        if (wpx > 0 && wpx < HXW)
+            cv_rect(HX0 + wpx - 1, y, 2, 11, col);
         /* ---- background 2: meter (beat 24 ticks, bar 96 ticks)
          * CONTEXT, not ruler (rev.24). John's point about 12- and 13-step
          * loops: a loop that is 0.75 or 0.8125 bars long never lands on a bar
@@ -380,14 +398,18 @@ static void draw_home(void)
         }
         /* ---- background 3 removed: the alternating pass stripes already
          * show where a loop restarts (see background 1). ---- */
-        /* ---- notes: ONE pass, inside the band only (rev.23) ---- */
+        /* ---- notes: absolute slots, inside the window only (rev.26) ----
+         * Iterate the WINDOW in play order but draw each note at its ABSOLUTE
+         * slot position, so the hero and the GRID agree cell for cell. The
+         * iteration order still matters for gate/next_event math (which is
+         * play-order semantics); only the x mapping is absolute now. */
         for (s = 0; s < tr->loop_len; s++) {
             uint8_t si = (uint8_t)((tr->loop_start + s) & 63);
             ds_step *st = &tr->steps[si];
-            int x = HX0 + tx((int)s * ct);
+            int x = HX0 + tx(((int)si % 64) * ct);
             int rel_end = (int)tr->loop_len - (int)s;   /* steps left in loop */
-            if (x >= HX0 + lpx)
-                break;                       /* past the loop: nothing to draw */
+            if (x >= HX0 + wpx)
+                continue;                    /* outside the window: nothing */
             if (!st->on || !st->nvoices)
                 continue;
             if (is_drum) {
@@ -428,8 +450,8 @@ static void draw_home(void)
                 gpx = tx(gsteps * ct);
                 if (gpx < 1)
                     gpx = 1;
-                if (x + gpx > HX0 + lpx)       /* gate stops at the loop edge */
-                    gpx = HX0 + lpx - x;
+                if (x + gpx > HX0 + wpx)       /* gate stops at the window edge */
+                    gpx = HX0 + wpx - x;
                 ly = y + 1 + (sort_n - 1 - vi) * 3;   /* high pitch on top */
                 cv_rect(x, ly, gpx, 1,
                         st->prob < 100 ? blend(c, RGB565(29, 29, 38), 115) : c);
@@ -448,13 +470,14 @@ static void draw_home(void)
          * the same clock the engine schedules from, so the line cannot lie
          * about the audio. */
         if (g.playing) {
-            int rel = (int)((g.pos16[t] + 64u - tr->loop_start) & 63u);
-            if (rel < (int)tr->loop_len) {
-                int ph = HX0 + tx((int)((double)rel * ct + g.frac16[t] * ct));
-                if (ph >= HX1)
-                    ph = HX1 - 1;
-                cv_rect(ph, y, 1, 11, C_WHITE);
-            }
+            /* absolute slot of this track's head (rev.26): pos16 already IS an
+             * absolute slot index — the old code subtracted loop_start to get a
+             * play-order offset, which only worked while notes were also drawn
+             * play-order. Both are absolute now. */
+            int ph = HX0 + tx((int)((double)g.pos16[t] * ct + g.frac16[t] * ct));
+            if (ph >= HX1)
+                ph = HX1 - 1;
+            cv_rect(ph, y, 1, 11, C_WHITE);
         }
 outline:
         if (t == sel_track) {                        /* selected: green outline at 46 / 239 */

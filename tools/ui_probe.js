@@ -30,6 +30,7 @@ const EN_SELECT = 0, EN_ALGO = 1, EN_PRESET = 2, EN_K1 = 3, EN_K2 = 4,
  * rev.24 dimmed the meter below the loop band: the bar grid is now CONTEXT
  * (where am I in the bar), not the ruler loops are measured against — a
  * 12-step loop is 0.75 bar and never lands on a bar line at all. */
+const HX0 = 47, HX1 = 239;          /* hero bar area (ui_screens.c) */
 const BAR_LINE = '40,40,48';        /* meter: bar line   RGB565(42,42,52) */
 const BEAT_LINE = '32,32,40';       /* meter: beat line  RGB565(34,34,42) */
 
@@ -222,7 +223,10 @@ createMod().then((M) => {
             setZoom(4);
             const f = setLen(len);
             const y = 24 + 5;                       /* trk1, inside a row */
-            const wantX = 47 + Math.floor(len * 6 * 192 / 384);   /* tx(len*ct) */
+            /* rev.26: the axis is ABSOLUTE slots, so the window edge is at
+             * loop_start + len, not at len. trk1 starts at 0 here, but writing
+             * the formula with the start keeps it honest if that changes. */
+            const wantX = 47 + Math.floor((0 + len) * 6 * 192 / 384);
             /* find the brightest pixel in the row = the loop edge */
             let bestX = -1, bestL = -1;
             for (let x = 47; x < 239; x++) {
@@ -240,6 +244,50 @@ createMod().then((M) => {
         }
         toHome();
         setLen(16);
+    }
+
+    /* ---- 4b3. hero draws ABSOLUTE slots, exactly like the GRID (rev.26) ----
+     * John: "都是hero画面有问题，grid画面正常" — the hero was drawing play-order
+     * positions while the GRID draws absolute step indices, so demo trk2
+     * (loop_start=4) disagreed by exactly 4 cells: its SNR hits at absolute
+     * 4/7/9/12/14 appeared as a 4-cell gap then notes. This pins hero note
+     * positions to the pattern data, cell for cell. */
+    {
+        const EXPECT = [
+            null,
+            [0, 4, 8, 12],              /* trk1 kick  E(16,4) start 0 */
+            [4, 7, 9, 12, 14],          /* trk2 snare E(12,5) start 4 */
+            [0, 3, 6],                  /* trk3 hats  E(8,3)  start 0 */
+        ];
+        toHome();
+        setZoom(4);
+        const f = frame();
+        const lumAt = (x, y) => {
+            const p = px(f, x, y).split(',').map(Number);
+            return p[0] + p[1] + p[2];
+        };
+        for (let t = 1; t <= 3; t++) {
+            const yTop = 24 + (t - 1) * 12;
+            const lit = [];
+            /* HX1 is the selected row's green outline, not a note -> exclude */
+            for (let x = HX0; x < HX1; x++) {
+                let best = 0;
+                for (let dy = 0; dy < 11; dy++) best = Math.max(best, lumAt(x, yTop + dy));
+                lit.push(best > 200);
+            }
+            const runs = []; let s = -1;
+            lit.forEach((v, i) => {
+                if (v) { if (s < 0) s = i; } else { if (s >= 0) { runs.push([s, i - 1]); s = -1; } }
+            });
+            if (s >= 0) runs.push([s, lit.length - 1]);
+            /* drop 1px meter/edge ticks: real note blocks are >=2px at x4 */
+            const steps = runs.filter(([a, b]) => b > a || a === 0)
+                              .map(([a]) => Math.round(a * 2 / 6));
+            const want = EXPECT[t];
+            check(JSON.stringify(steps) === JSON.stringify(want),
+                  'HERO: trk' + t + ' notes sit on ABSOLUTE slots (match GRID)',
+                  'hero=' + JSON.stringify(steps) + ' abs=' + JSON.stringify(want));
+        }
     }
 
     /* ---- 4c. every track draws its OWN playhead (rev.23) ----
