@@ -33,6 +33,11 @@ const EN_SELECT = 0, EN_ALGO = 1, EN_PRESET = 2, EN_K1 = 3, EN_K2 = 4,
 const HX0 = 47, HX1 = 239;          /* hero bar area (ui_screens.c) */
 const BAR_LINE = '40,40,48';        /* meter: bar line   RGB565(42,42,52) */
 const BEAT_LINE = '32,32,40';       /* meter: beat line  RGB565(34,34,42) */
+/* rev.31 GRID column ruler (ui_screens.c grid_tick_col) — different colours from
+ * the hero meter on purpose: these sit on a dark cell bed, the hero lines on a
+ * tinted loop band, so matching them would make one of the two unreadable. */
+const GRID_BAR  = '96,96,112';      /* RGB565(96,96,112) */
+const GRID_BEAT = '56,56,64';       /* RGB565(58,58,70) quantised */
 
 let fails = 0;
 function check(cond, msg, detail) {
@@ -544,16 +549,106 @@ createMod().then((M) => {
               'LED: switching drum moves the black key and clears old hits',
               'mask ' + bitsOf(M._ds_web_lit_k()));
 
-        /* the ruler must follow the DIVISION, not a hardcoded stride of 4 */
-        M._ds_web_btn(5, 1); M._ds_web_enc(5, -1); M._ds_web_btn(5, 0); frame(); /* GLO+K3 -> 1/8T */
-        M._ds_web_btn(5, 1); M._ds_web_enc(5, -1); M._ds_web_btn(5, 0); frame(); /* -> 1/8 */
-        check(stepsOf(M._ds_web_dim_k()) === '1,3,5,7,9,11,13,15',
-              'LED: at DIV 1/8 the ruler is every 2 steps (a beat is still 24 ticks)',
-              'got ' + stepsOf(M._ds_web_dim_k()));
-        /* restore 1/16 so later sections see the demo's default */
-        M._ds_web_btn(5, 1); M._ds_web_enc(5, 1); M._ds_web_btn(5, 0); frame();
-        M._ds_web_btn(5, 1); M._ds_web_enc(5, 1); M._ds_web_btn(5, 0); frame();
+        /* rev.31: the ruler is a PAGE QUARTILE and must NOT move when DIV
+         * changes. John 2026-10-20: "白键dim的含义，我原来设想是每4个step亮
+         * 一个，方便用户，所以和DIV无关，并不是按bar/beat". rev.29 derived it
+         * from ticks and got 1,3,5..15 at 1/8 and 1,9 at 1/32 — the marker
+         * drifted with the division and got sparser exactly where counting is
+         * hardest. Walk all five divisions; every one must read 1,5,9,13. */
+        {   const divs = [];
+            M._ds_web_btn(5, 1); M._ds_web_enc(5, -1); M._ds_web_btn(5, 0); frame();
+            M._ds_web_btn(5, 1); M._ds_web_enc(5, -1); M._ds_web_btn(5, 0); frame();
+            for (let i = 0; i < 5; i++) {                 /* 1/8 1/8T 1/16 1/16T 1/32 */
+                frame();
+                divs.push(stepsOf(M._ds_web_dim_k()));
+                M._ds_web_btn(5, 1); M._ds_web_enc(5, 1); M._ds_web_btn(5, 0);
+            }
+            check(divs.every(d => d === '1,5,9,13'),
+                  'LED: the dim ruler is a page quartile, identical at all 5 DIVs',
+                  divs.join(' | '));
+            /* and it must live on white keys at every division, not just 1/16 */
+            check((M._ds_web_dim_k() & ~W.reduce((a, k) => a | (1 << k), 0)) === 0,
+                  'LED: ruler stays on white key ids after walking DIV',
+                  'mask ' + bitsOf(M._ds_web_dim_k()));
+        }
+        /* back to 1/16 with two steps DOWN from 1/32 is 3 steps; go up 3 from
+         * 1/8 instead by re-walking: simplest is 1/32 -> up 3 */
+        M._ds_web_btn(5, 1); M._ds_web_enc(5, -1); M._ds_web_btn(5, 0); frame();
+        M._ds_web_btn(5, 1); M._ds_web_enc(5, -1); M._ds_web_btn(5, 0); frame();
+        M._ds_web_btn(5, 1); M._ds_web_enc(5, -1); M._ds_web_btn(5, 0); frame();
         M._ds_web_enc(0, -1); frame();                     /* SELECT back to trk1 */
+    }
+
+    /* ---- 4e. GRID column ruler (rev.31) ----
+     * GRID drew no metric structure at all before this, which is why the keybed
+     * LEDs ended up impersonating a beat ruler. Time now lives here: bar ticks
+     * brighter, beat ticks dimmer, in the gutter between cells so a note line is
+     * never covered.
+     *
+     * The critical assertion is the PER-ROW phase. A page is 16 steps; at 1/16
+     * that is exactly one bar, but at 1/8T and 1/16T it is 1.33 and 0.67 bars, so
+     * rows below the first start at a different point in the bar. A single
+     * full-height line (the obvious implementation) is correct on row 0 and
+     * wrong below — the same class of bug as the rev.29 LED ruler. */
+    {   const gx = (c) => 18 + c * 13 - 1;          /* melodic gutter, left of cell c */
+        const gticks = (fb, r) => {
+            const out = [];
+            for (let c = 0; c < 16; c++) {
+                const col = px(fb, gx(c), 16 + r * 24 + 5);
+                if (col === GRID_BAR) out.push((c + 1) + 'B');
+                else if (col === GRID_BEAT) out.push((c + 1) + 'b');
+            }
+            return out.join(' ');
+        };
+        const setDiv = (d) => { M._ds_web_btn(B_GLO, 1); M._ds_web_enc(EN_K3, d); M._ds_web_btn(B_GLO, 0); };
+        const toTrk4 = () => { for (let i = 0; i < 3; i++) M._ds_web_enc(EN_SELECT, 1); };
+        /* DIV is PER TRACK, and the LED block above walked trk2's DIV. Start the
+         * drum assertion from the track whose DIV we are about to set: reading
+         * another track's ladder is how this assertion first saw 1/8T's
+         * pattern while asking for 1/8. */
+        M._ds_web_enc(EN_SELECT, -1); frame();      /* -> trk1 (drum) */
+
+        /* drum grid: vertical axis is INSTRUMENT, so one tick runs the full
+         * height of the lane block — asserted once, not per lane.
+         * DIV is a dead-stop ladder, so step to a known end first: the LED
+         * block above leaves it wherever its walk finished, and assuming that
+         * is how the first run of this assertion read 1/8T's pattern. */
+        /* Ladder order is 1/8, 1/8T, 1/16, 1/16T, 1/32, so "-1 from 1/16" is
+         * 1/8T, not 1/8. Step to the low dead-stop instead of counting from an
+         * assumed start — that off-by-one produced a 1/8T pattern while the
+         * assertion asked for 1/8. */
+        for (let i = 0; i < 4; i++) setDiv(-1);     /* dead-stop: 1/8 */
+        const d8 = (() => {
+            const fb = frame(); const out = [];
+            for (let c = 0; c < 16; c++) {
+                const col = px(fb, 30 + c * 13 + 2 - 1, 16 + 3 * 11 + 2);
+                if (col === GRID_BAR) out.push((c + 1) + 'B');
+                else if (col === GRID_BEAT) out.push((c + 1) + 'b');
+            }
+            return out.join(' ');
+        })();
+        check(d8 === '1B 3b 5b 7b 9B 11b 13b 15b',
+              'GRID drum: at 1/8 a page is 2 bars, ticks every 2 steps',
+              d8);
+
+        setDiv(1); setDiv(1);                       /* back to 1/16 */
+        toTrk4(); frame();                          /* melodic grid */
+        const r16 = [0, 1, 2, 3].map(r => gticks(frame(), r));
+        check(r16.every(t => t === '1B 5b 9b 13b'),
+              'GRID melodic: at 1/16 every row carries the full 4-beat bar',
+              r16.join(' | '));
+
+        setDiv(1);                                  /* 1/16T: page = 0.67 bar */
+        const r16t = [0, 1, 2, 3].map(r => gticks(frame(), r));
+        check(r16t[0] !== r16t[1] && r16t[0].includes('B'),
+              'GRID melodic: at 1/16T rows have DIFFERENT beat phase (not one line)',
+              r16t.join(' | '));
+        check(r16t[0] === '1B 7b 13b' && r16t[1] === '3b 9B 15b',
+              'GRID melodic: 1/16T per-row phase is exactly 1B 7b 13b / 3b 9B 15b',
+              r16t[0] + ' | ' + r16t[1]);
+        setDiv(-1);                                 /* back to 1/16 */
+        for (let i = 0; i < 3; i++) M._ds_web_enc(EN_SELECT, -1);   /* trk4 -> trk1 */
+        frame();
     }
 
     console.log(fails ? '== ' + fails + ' UI PROBE FAILURES ==' : 'UI PROBE OK');

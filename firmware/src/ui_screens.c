@@ -249,6 +249,32 @@ static const char *div_str(uint8_t div)
  * than the cell pitch once zoomed out (at 8 bars a 1/16 cell is 1.5px). */
 static int step_w(int ct) { int w = tx(ct) - 1; return w < 1 ? 1 : w; }
 
+/* ---- GRID column ruler: where does a beat/bar fall? (rev.31) ----
+ * GRID used to draw no metric structure at all, which left the keybed LEDs as
+ * the only thing claiming to say "this is a beat" — and a key page is a bar
+ * only at 1/16, so that claim was wrong at four of five divisions. Time now
+ * lives on the screen and the keys go back to being pure space (03 §3.2).
+ *
+ * Must be evaluated PER ROW, not once for the whole grid: at 1/8T and 1/16T a
+ * page is 128 and 64 ticks — 1.33 and 0.67 bars — so row r starts at a
+ * different position in the bar and the beat phase shifts row to row. A single
+ * full-height line would be right on row 0 and wrong below it.
+ *
+ * Every division divides a quarter exactly (12/8/6/4/3 into 24), so a beat
+ * boundary is ALWAYS a cell boundary and the tick can live in the black gutter
+ * between cells instead of overprinting content. */
+static int grid_tick_kind(uint8_t s, int ct)      /* 0 none / 1 beat / 2 bar */
+{
+    int t = s * ct;
+    if (t % TPB == 0) return 2;
+    if (t % (TPB / 4) == 0) return 1;
+    return 0;
+}
+static uint16_t grid_tick_col(int kind)
+{
+    return kind == 2 ? RGB565(96, 96, 112) : RGB565(58, 58, 70);
+}
+
 /* distance (in steps) from s to the next step holding a voice, within the
  * window; 0xFF gate means "hold until that event or the loop end" */
 static int next_event_run(uint8_t t, uint8_t s, uint8_t len, uint8_t start)
@@ -580,6 +606,7 @@ static void draw_grid_melodic(void)
         ui_draw_edit_badge();
     {
         const int x0 = 18, cw = 13, chh = 24;        /* r16j: x0=18, cw=(240-18-16)/16=13 */
+        const int nct = cell_ticks(tr->division);    /* one lookup for the grid */
         for (r = 0; r < 4; r++)
             for (c = 0; c < 16; c++) {
                 uint8_t s = (uint8_t)(r * 16 + c);
@@ -588,8 +615,14 @@ static void draw_grid_melodic(void)
                 uint8_t rel = (uint8_t)((s + 64 - start) & 63);
                 uint8_t inWin = rel < len;
                 uint8_t vi;
+                int tk = grid_tick_kind(s, nct);
                 /* cell bg: loop range (bright inside / dark outside) */
                 cv_rect(x + 1, y + 1, cw - 2, chh - 2, inWin ? RGB565(42, 42, 51) : RGB565(22, 22, 28));
+                /* metric tick in the gutter between cells, so it never covers a
+                 * note line (rev.31 — GRID previously had no time structure at
+                 * all, which is why the keybed LEDs ended up impersonating it) */
+                if (tk)
+                    cv_rect(x - 1, y + 1, 1, chh - 1, grid_tick_col(tk));
                 if (st->on && st->nvoices == 0)      /* bare gate (r15b/#16) */
                     cv_rect(x + 2, y + chh - 4, cw - 4, 3, blend(D_PAL[(uint8_t)((tr->channel * 3) % 11)], C_BLACK, 153));
                 voices_sorted(sel_track, s);         /* pitch-ascending, high on top */
@@ -648,6 +681,21 @@ static void draw_grid_drum(void)
             TRK()->mute ? MUTE_GRAY : GREEN_OK);
     if (focus_layer)
         ui_draw_edit_badge();
+    /* GRID metric ruler (rev.31), drawn once for the whole lane block: in the
+     * drum grid the vertical axis is INSTRUMENT, so every lane in column c is
+     * the same step — one full-height tick per column is both correct and
+     * cheaper than 144 little ones. (The melodic grid cannot do this: its
+     * vertical axis is pitch and its rows are different steps, so there the
+     * tick is per cell.) */
+    {   int c;
+        const int nct = cell_ticks(TRK()->division);
+        for (c = 0; c < 16; c++) {
+            int tk = grid_tick_kind((uint8_t)(page * 16 + c), nct);
+            if (tk)
+                cv_rect(x0 + c * cw + gap / 2 - 1, y0, 1, NDRUM * lh - 1,
+                        grid_tick_col(tk));
+        }
+    }
     for (li = 0; li < NDRUM; li++) {
         int y = y0 + li * lh;
         uint8_t sel = (li == drum_sel);

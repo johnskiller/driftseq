@@ -306,10 +306,11 @@ static void ui_poll(void)
  *                 cannot express: they say "a hit here", never "which drum")
  *   both        = the key is a beat AND has a hit; lit wins (louder fact)
  *
- * Beats are computed in TICKS, not steps: a beat is TPB/4 = 24 ticks, so at
- * 1/8 a beat is 2 steps, at 1/8T it is 3, at 1/32 it is 8. Hardcoding "every
- * 4th step" would put the ruler in the wrong place on three of the five
- * divisions, which is worse than no ruler at all.
+ * The dim ruler is a PAGE QUARTILE (1,5,9,13), independent of DIVISION.
+ * rev.29 computed it in ticks (a beat = TPB/4 = 24) and that was wrong: a key
+ * page is 16 STEPS, and 16 steps is a bar only at 1/16. John 2026-10-20:
+ * "我原来设想是每4个step亮一个，方便用户，所以和DIV无关，并不是按bar/beat".
+ * See the long note at the point of use.
  *
  * NOT in this mask: the playhead flash (03 asks for "闪 = playhead"). The mask
  * is a pure function of edit state, deliberately with no clock in it, so that
@@ -325,8 +326,8 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
     ds_track *tr = TRK();
     uint8_t is_drum = (tr->channel == 9);
     uint8_t page = cursor >> 4;
-    int ct = cell_ticks(tr->division);
-    int c;
+    int c;                     /* note: nothing here reads the DIVISION — the
+                                * ruler is a page quartile, not a beat (rev.31) */
 
     *litK = *dimK = *litB = *dimB = 0;
 
@@ -354,9 +355,19 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
         if (key == 0xFF)
             continue;
         if (on) *litK |= 1u << key;
-        /* beat onset: 24 ticks = one beat in 4/4 (TPB = 96). At 1/16 (6 ticks
-         * per step) that is steps 0,4,8,12 — the 1,5,9,13 John asked for. */
-        if (((s * ct) % (TPB / 4)) == 0)
+        /* Page quartile, NOT a beat (rev.31). John 2026-10-20: "白键dim的含义，
+         * 我原来设想是每4个step亮一个，方便用户，所以和DIV无关，并不是按
+         * bar/beat". He is right, and the rev.29 tick version was wrong: a page
+         * is not a bar. At 1/8 a page spans TWO bars, at 1/16T and 1/32 it does
+         * not even fill one — so deriving a marker from time put it on no
+         * stable object (1/16T gave 1,7,13: three quarters, then a stub), and
+         * it got SPARSER the coarser you went (8 marks at 1/8 down to 2 at
+         * 1/32), i.e. it failed hardest exactly where counting is hardest.
+         * The keys are a 16-wide SPACE showing one page; dividing that space
+         * into four is well defined at every division and survives a DIV
+         * change without moving. Time belongs on the screen (GRID now draws
+         * beat/bar columns), so the two never impersonate each other. */
+        if ((c & 3) == 0)
             *dimK |= 1u << key;
     }
     /* One white key = one step of the CURRENT page (03 §2.3 "cursor 所在 16 格页
