@@ -16,7 +16,7 @@ EMCC    ?= emcc
 
 HOST_SRC = host/driftseq.c host/demo_pattern.c
 
-.PHONY: all test golden wasm uiwasm wasmtest fwcheck fwbuild check uiprobe gh-pages clean
+.PHONY: all test golden wasm uiwasm wasmtest fwcheck fwbuild fwpkg pkgcheck check uiprobe gh-pages clean
 
 all: test golden
 
@@ -57,7 +57,19 @@ fwcheck:
 fwbuild:
 	JIELI_TOOLCHAIN=$(JIELI_TOOLCHAIN) python3 tools/build.py --check
 
-# everything that must be green before a push
+# the flashable artifact: build/driftseq.fwsc. Needs the AC79 SDK as well
+# (AC79_SDK=...): flash_image() takes uboot.boot / cfg_tool.bin / eq_cfg_hw.bin
+# from the SDK, so this cannot be part of `check` on a machine without it.
+fwsc: fwbuild
+	JIELI_TOOLCHAIN=$(JIELI_TOOLCHAIN) AC79_SDK=$(AC79_SDK) python3 tools/build.py --package
+
+# read the package back the way the device does (ota.c ota_ufw + the SFC/ENC
+# ciphers) and assert every CRC and field. --package only proves it BUILT.
+pkgcheck: fwsc
+	python3 tools/fw_pkgcheck.py
+
+# everything that must be green before a push. fwsc/pkgcheck are opt-in: they
+# need the AC79 SDK and a 600 KB output nobody wants in a test loop.
 check: test golden fwcheck fwbuild uiprobe
 
 # pixel-level contracts the hostcheck cannot see (it stubs cv_rect out):
