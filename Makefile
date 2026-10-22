@@ -16,7 +16,7 @@ EMCC    ?= emcc
 
 HOST_SRC = host/driftseq.c host/demo_pattern.c
 
-.PHONY: all test golden wasm uiwasm wasmtest fwcheck fwbuild fwpkg pkgcheck check uiprobe gh-pages clean
+.PHONY: all test golden wasm uiwasm wasmtest fwcheck clockcheck fwbuild fwpkg pkgcheck check uiprobe gh-pages clean
 
 all: test golden
 
@@ -51,6 +51,12 @@ wasmtest: wasm
 fwcheck:
 	python3 tools/fw_check.py
 
+# the sequencer clock: ds_tick() must advance by the delta it is GIVEN, so that
+# a loop iteration taking 8 ms produces 8 ms of music. Host-only, no toolchain.
+clockcheck:
+	gcc -O1 -Ihost -Ifirmware/src tools/clock_check.c host/driftseq.c host/demo_pattern.c -o build/clock_check -lm
+	./build/clock_check
+
 # the real thing: pi32v2 cross build + entry/ram_text/image checks. Needs the
 # JieLi toolchain (JIELI_TOOLCHAIN=...). This target exists because the fw
 # build silently rotted while only fwcheck/uiprobe were run.
@@ -70,7 +76,7 @@ pkgcheck: fwsc
 
 # everything that must be green before a push. fwsc/pkgcheck are opt-in: they
 # need the AC79 SDK and a 600 KB output nobody wants in a test loop.
-check: test golden fwcheck fwbuild uiprobe
+check: test golden fwcheck clockcheck fwbuild uiprobe
 
 # pixel-level contracts the hostcheck cannot see (it stubs cv_rect out):
 # meter spacing per zoom, the ARP strip sharing the hero axis, which page owns
