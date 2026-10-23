@@ -211,6 +211,24 @@ def check(img, syms, rt, elf):
     for lname in ('_rt_load', '_c1_load', '_data_load'):
         if lname in syms and syms[lname] - APP_XIP > len(img):
             errs.append(f'{lname} {syms[lname]:#x} lies past the end of the image')
+
+    # THE RAMTEXT COPY (rev.35). Being IN the image is not the same as being
+    # copied OUT of it at boot: fm1_cstart has to run a loop over
+    # [_rt_start,_rt_end), or .ram_text executes from whatever the bootloader
+    # left in RAM. That is where the flash driver lives, so a missing copy makes
+    # the whole .fwsc update path garbage while the build stays green — which is
+    # exactly how this survived. Assert on the linked code: .ram_text must not
+    # be empty, and something in fm1_cstart must read from _rt_load.
+    rt_bytes = 0
+    if '_rt_start' in syms and '_rt_end' in syms:
+        rt_bytes = syms['_rt_end'] - syms['_rt_start']
+    if rt_bytes and '_rt_load' in syms:
+        dis = tc('objdump', '-d', str(elf)).stdout
+        seg = dis.split('\nfm1_cstart:', 1)          # this objdump labels bare
+        body = seg[1].split('\n\n', 1)[0] if len(seg) > 1 else ''
+        if '_rt_load' not in body:
+            errs.append(f'.ram_text is {rt_bytes} B but fm1_cstart never copies it: '
+                        'the flash driver would run from uninitialised RAM')
     return errs, notes
 
 

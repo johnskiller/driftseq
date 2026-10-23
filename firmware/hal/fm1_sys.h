@@ -76,6 +76,44 @@ static void fm1_p33_write(uint32_t a, uint8_t d) { fm1__p33_op(0, a, d); }
 static void fm1_p33_or(uint32_t a, uint8_t d) { fm1__p33_op(1, a, d); }
 static void fm1_p33_and(uint32_t a, uint8_t d) { fm1__p33_op(2, a, d); }
 
+/* --------------------------------------------------------- supply rails --- */
+/* The boot loader leaves VDC14 3 / SYSVDD 11 (1.40 / 1.26 V); the stock
+ * firmware runs 7 / 15 (1.60 / 1.38 V). x0x does this at the top of fm1_main
+ * with the reason spelled out (fm1-x0x#21): UNDER LOAD some units read flash
+ * and SRAM wrong at the lower levels. The flash driver and USB both run under
+ * load, and the GM sound source will add more.
+ *
+ * Raised one step at a time, each with 100 us to settle — same as x0x, and the
+ * reason is not cosmetic: a single jump to the top level is the kind of step
+ * that browns out the core.
+ *
+ * DriftSeq ran without this until rev.35 while fm1-ctrl and x0x both had it.
+ * It does not show up on an idle unit, which is exactly why it is worth fixing
+ * before the load arrives rather than after: the failure it produces reads like
+ * a random crash from a bad jump, not like a power problem. */
+#define FM1_P3_ANA_CON6 0x06u
+#define FM1_P3_ANA_CON9 0x09u
+static uint32_t fm1_vdc14(void) { return fm1_p33_read(FM1_P3_ANA_CON6) & 7u; }
+static void fm1_vdc14_raise(uint32_t level)
+{
+    uint32_t v = fm1_vdc14();
+    while (v < level && v < 7u) {
+        v++;
+        fm1_p33_write(FM1_P3_ANA_CON6, (uint8_t)((fm1_p33_read(FM1_P3_ANA_CON6) & ~7u) | v));
+        fm1_delay_us(100);
+    }
+}
+static uint32_t fm1_sysvdd(void) { return fm1_p33_read(FM1_P3_ANA_CON9) & 15u; }
+static void fm1_sysvdd_raise(uint32_t level)
+{
+    uint32_t v = fm1_sysvdd();
+    while (v < level && v < 15u) {
+        v++;
+        fm1_p33_write(FM1_P3_ANA_CON9, (uint8_t)((fm1_p33_read(FM1_P3_ANA_CON9) & ~15u) | v));
+        fm1_delay_us(100);
+    }
+}
+
 /* ------------------------------------------------------------ watchdog --- */
 #define FM1_P3_WDT_CON 0x80u
 #define FM1_P3_VLD_KEEP 0x17u

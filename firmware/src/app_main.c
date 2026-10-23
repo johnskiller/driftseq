@@ -59,6 +59,23 @@ void fm1_timer5_irq(void)
 static void ds_main(void);
 extern uint8_t _bss_start[], _bss_end[], _pool_start[], _pool_end[];
 extern const uint8_t _data_load[], _data_start[], _data_end[];
+/* .ram_text / .c1_text: code that must EXECUTE from RAM, linked at RAMTEXT
+ * (0x01C00000) and stored in the image. The flash driver lives there — it runs
+ * while the flash is busy, so it cannot be fetched from the flash it is writing
+ * — and so does the CPU1 handoff. app.ld has always emitted these symbols and
+ * build.py has always packed the segments (that is the 1,140 B that a
+ * .text-only image used to drop), but fm1_cstart never copied them down, so at
+ * runtime they were whatever the bootloader left in RAM. x0x's fm1_cstart does
+ * this copy.
+ *
+ * _rt_end is defined by app.ld as _c1_end: .ram_text and .c1_text are adjacent
+ * in RAMTEXT and adjacent in the image, so ONE copy over [_rt_start,_c1_end)
+ * covers both. Copying them in two loops as fm1-ctrl does would also work, but
+ * only because the two ranges happen to be contiguous — a single loop over the
+ * union says what is actually true and cannot be broken by a later gap. */
+extern const uint8_t _rt_load[], _c1_load[];
+/* _rt_start / _rt_end are declared by fm1_guard.h (as uint32_t[]): one
+ * declaration, so the guard and this copy cannot disagree about the window. */
 
 void fm1_cstart(void)
 {
@@ -68,6 +85,20 @@ void fm1_cstart(void)
     fm1_reset_reason();
     fm1_wdt_arm(0x0D);
     fm1_irq_init();
+    {   /* Supply rails to M-VAVE's own levels BEFORE anything runs under load
+         * (rev.35; fm1-ctrl and x0x both do this at the top of their main, we
+         * did not). The boot loader leaves VDC14 3 / SYSVDD 11 = 1.40 / 1.26 V;
+         * stock runs 7 / 15 = 1.60 / 1.38 V. fm1-x0x#21: under load some units
+         * read flash and SRAM wrong at the lower levels.
+         *
+         * IRQs off across the ramp: fm1_delay_us here is metered by TIMER4,
+         * which is fine, but a supply change should not be interleaved with an
+         * interrupt that might touch flash. */
+        uint32_t f = irq_save();        /* fm1_flash.h's, as x0x uses */
+        fm1_vdc14_raise(7);
+        fm1_sysvdd_raise(15);
+        irq_restore(f);
+    }
     for (d = (uint32_t *)_bss_start; d < (uint32_t *)_bss_end; d++)
         *d = 0;
     for (d = (uint32_t *)_pool_start; d < (uint32_t *)_pool_end; d++)
@@ -76,6 +107,19 @@ void fm1_cstart(void)
         const uint8_t *s;
         for (s = _data_load, d = (uint32_t *)_data_start; (uint8_t *)d < _data_end; s += 4, d++)
             *d = *(const uint32_t *)s;
+    }
+    {   /* .ram_text + .c1_text -> RAMTEXT before ANY call can reach them. One
+         * loop: the two ranges are contiguous in both the image and RAMTEXT
+         * (_rt_end == _c1_end in app.ld), so the union is the honest span.
+         *
+         * This copy is what makes the flash driver real: it lives in .ram_text
+         * because it cannot execute from the flash it is erasing. Without the
+         * copy it ran from uninitialised RAM — the erase/program path and the
+         * whole .fwsc update route were garbage that happened to sit there. */
+        const uint8_t *s;
+        uint8_t *t;
+        for (s = _rt_load, t = (uint8_t *)_rt_start; t < (uint8_t *)_rt_end; s++, t++)
+            *t = *s;
     }
     fm1_irq_enable_all();
     ds_main();
