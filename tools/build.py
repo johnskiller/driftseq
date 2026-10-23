@@ -156,7 +156,7 @@ def build_image(elf):
     return bytes(img), syms
 
 
-def check(img, syms, rt):
+def check(img, syms, rt, elf):
     from fm1pkg_make import APP_SLOT
     errs, notes = [], []
     if syms.get('_start') != APP_XIP:
@@ -166,6 +166,35 @@ def check(img, syms, rt):
     calls = [l for l in rt.splitlines() if '\tcall' in l]
     if calls:
         errs.append(f'.ram_text has {len(calls)} calls (must run from RAM without XIP)')
+    # THE ISR WRAPPER (fm1-ctrl cb890a1). fm1_isr.S defines isr_timer5 as the only
+    # entry that saves psr/rets/reti and ends in csync/rti; clang will not emit that
+    # csync, so a plain C function cannot be an ISR. If a local `static void
+    # isr_timer5()` ever shadows the wrapper again, --gc-sections drops the asm, the
+    # vector points at C, and the unit sits on its splash with no main loop and no
+    # USB. Assert on the LINKED artifact, not on the source: that is what caught
+    # nothing the first time.
+    if 'fm1_timer5_irq' not in syms:
+        errs.append('fm1_timer5_irq missing: the wrapper in fm1_isr.S has no C body '
+                    '(the C body must be named fm1_timer5_irq, not isr_timer5)')
+    if 'isr_timer5' not in syms:
+        errs.append('isr_timer5 missing: the asm wrapper was dropped '
+                    '(is a local static isr_timer5 shadowing fm1_isr.S?)')
+    else:
+        # A symbol named isr_timer5 is NOT enough: a C shim called isr_timer5 has
+        # exactly that name too, and that was the original bug. The wrapper is
+        # identified by its CODE — it opens by pushing psr/rets/reti and ends in
+        # rti/rtss. Anything else means the vector points at C.
+        seg = tc('objdump', '-d', str(elf)).stdout.split('isr_timer5:', 1)
+        if len(seg) < 2:
+            errs.append('isr_timer5 has no disassembly')
+        else:
+            body = seg[1].split('\nisr_alnk0:', 1)[0]
+            head = '\n'.join(body.splitlines()[:4])
+            if '[--sp] = {psr' not in head:
+                errs.append('isr_timer5 does not open with the psr/rets/reti push: '
+                            'this is a C function, not the fm1_isr.S wrapper')
+            if 'rti' not in body:
+                errs.append('isr_timer5 does not end in rti: not the fm1_isr.S wrapper')
     if len(img) > APP_SLOT:
         errs.append(f'image {len(img)} B exceeds the app slot {APP_SLOT} B')
     # RAM budget: .bss lives in the 96 KiB RAM region, .pool in the 344 KiB POOL
@@ -236,7 +265,7 @@ def main():
 
     if a.check or a.package:
         rt = tc('objdump', '-d', '-j', '.ram_text', str(elf)).stdout
-        errs, notes = check(img, syms, rt)
+        errs, notes = check(img, syms, rt, elf)
         for n in notes:
             print('ok  ' + n)
         if errs:

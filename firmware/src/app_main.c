@@ -14,8 +14,26 @@ static void midi_transport_usb3(uint8_t st, uint8_t d1, uint8_t d2)
     plat_midi_out((uint32_t)cin | (uint32_t)st << 8 | (uint32_t)d1 << 16 | (uint32_t)d2 << 24);
 }
 
-/* TIMER5 ISR: fm1-ctrl's (no audio on this firmware) */
-static void ds_timer5_irq(void)
+/* TIMER5 ISR: fm1-ctrl's (no audio on this firmware).
+ *
+ * The NAME is load bearing (rev.34; this is fm1-ctrl's cb890a1, the bug that
+ * kept its first smoke build from ever reaching the main loop). fm1_isr.S has
+ *
+ *     FM1_ISR isr_timer5, fm1_timer5_irq
+ *
+ * which is the only entry that saves psr/rets/reti, restores them, and ends in
+ * csync/rti — clang does not emit that csync, so an ISR cannot be a plain C
+ * function. So:
+ *   - the C body must be called fm1_timer5_irq (the name the wrapper calls);
+ *   - fm1_timer5_start() must be given the WRAPPER isr_timer5.
+ * A local `static void isr_timer5(void)` shadows the wrapper, nothing references
+ * it, --gc-sections drops it, and the first timer tick jumps into C code with no
+ * context save and no rti: the screen is already drawn, so the unit sits on its
+ * splash with no main loop and no USB polling. That is exactly the failure mode
+ * "display on, no MIDI device, no note". */
+extern void isr_timer5(void);        /* fm1_isr.S: FM1_ISR isr_timer5, fm1_timer5_irq */
+
+void fm1_timer5_irq(void)
 {
     static uint32_t sub;
     uint8_t usb_due;
@@ -37,8 +55,6 @@ static void ds_timer5_irq(void)
         }
     }
 }
-
-static void isr_timer5(void) { ds_timer5_irq(); }
 
 static void ds_main(void);
 extern uint8_t _bss_start[], _bss_end[], _pool_start[], _pool_end[];
@@ -120,7 +136,7 @@ static void ds_main(void)
     ui_init();
     ds_state_init();
     usb_start();
-    fm1_timer5_start(isr_timer5, 4);
+    fm1_timer5_start(isr_timer5, 4);   /* the asm wrapper, not a C function */
     fm1_guard_lock_top();
     fm1_irq_enable_all();
     fm1_delay_ms(300);
