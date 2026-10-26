@@ -96,6 +96,7 @@ function blit(){
     d[o]=((v>>11)&31)<<3; d[o+1]=((v>>5)&63)<<2; d[o+2]=(v&31)<<3; d[o+3]=255;
   }
   ctx.putImageData(imgData,0,0);
+  if (window.DSGallery) DSGallery.mirror(imgData);   // integer-scaled second view
   ctx.font='8px monospace'; ctx.fillStyle='rgba(255,255,255,0.35)';
   ctx.fillText(BUILD,196,238);                     // build stamp (John: freshness at a glance)
 }

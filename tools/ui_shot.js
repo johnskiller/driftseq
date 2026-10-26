@@ -17,9 +17,13 @@ const createMod = require(path.join(WEB, 'ui.js'));
 
 const PAGE = (process.argv[2] || 'arp').toLowerCase();
 const OUT = process.argv[3] || '/tmp/ds_' + PAGE + '.png';
+/* optional: node tools/ui_shot.js arp out.png <n>  -- euclid ring length.
+ * n=64 is the case worth looking at: it is the only length where i*64/n
+ * divides exactly, so the ring uses all 64 table directions. */
+const RING_N = parseInt(process.argv[4] || '0', 10);
 
 const B_SEQ = 9, B_ARP = 8, B_HOME = 6, B_EDIT = 4, B_GLO = 5;
-const EN_K4 = 6;
+const EN_K2 = 4, EN_K4 = 6;
 
 /* RGB565 fb -> PNG (8-bit RGB). No deps: the whole point is that this runs
  * anywhere node runs, including a bare container with no canvas package. */
@@ -54,6 +58,13 @@ createMod().then((M) => {
         /* a fresh track shows the "K4 - generate" hint page instead of the
          * ring, so generate first (same trap the ring probe documents) */
         M._ds_web_enc(EN_K4, 1);
+        /* K2 is the ring length, stepping 2..64. A track starts at 16 and
+         * generate keeps the k/n meta, so to reach RING_N step up from 16. */
+        if (RING_N >= 2 && RING_N <= 64) {
+            const steps = RING_N >= 16 ? RING_N - 16 : -(16 - RING_N);
+            for (let i = 0; i < Math.abs(steps); i++)
+                M._ds_web_enc(EN_K2, steps > 0 ? 1 : -1);
+        }
     } else if (PAGE === 'edit') {
         btn(B_EDIT);
     } else if (PAGE === 'home') {

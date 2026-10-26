@@ -37,6 +37,22 @@ a { color:inherit; }
 .start button { font:inherit; font-size:18px; padding:12px 28px; background:#fff; color:#000; border:0; cursor:pointer; }
 .start button:disabled { opacity:.4; cursor:progress; }
 .start p { margin:0; max-width:32em; text-align:center; color:#fff; }
+/* ---- gallery of the screen, integer-scaled ----
+ * The panel canvas is 240x240 attributes stretched to a fractional CSS width
+ * (248/1000 of the device box), so on a typical desktop it lands near 1.04x
+ * and `pixelated` makes a line 1px wide on some columns and 2px on others.
+ * That is fine for playing the emu and useless for judging a 1px detail, which
+ * is what this second view is for: 1 canvas pixel is exactly N device pixels,
+ * chosen as the largest integer that fits. See ui_gallery.js. */
+.screens { display:flex; gap:18px; align-items:flex-start; margin:14px auto 0; max-width:1040px;
+           flex-wrap:wrap; }
+.screens figure { margin:0; display:flex; flex-direction:column; gap:6px; }
+.screens figcaption { font-size:11px; color:var(--dim); text-align:center; }
+.screens .panel-view { flex:1 1 auto; min-width:0; }
+.screens .mag-view { flex:0 0 auto; }
+#magnified { display:block; background:#000; border:1px solid var(--rule); border-radius:2px;
+             image-rendering:crisp-edges; image-rendering:pixelated; }
+.cap-left { margin:4px 0 0; font-size:11px; line-height:1.4; color:var(--dim); }
 #mon { max-width:1040px; margin:10px auto 0; padding:6px 10px; background:var(--tray); color:#9fd9b0;
        font:11px/1.5 ui-monospace,Menlo,Consolas,monospace; border-radius:8px; min-height:1.5em;
        overflow:hidden; white-space:nowrap; text-overflow:clip; }
@@ -51,10 +67,22 @@ footer small { font-size:11px; opacity:.8; }
 </head>
 <body>
 <main>
+<div class="screens">
+  <div class="panel-view">
 <div class="device" id="device">
   <svg id="panel" viewBox="0 0 1000 624" aria-hidden="true"></svg>
   <canvas id="screen" width="240" height="240" role="img" aria-label="The screen"></canvas>
   <div class="start" id="start"><button id="go" type="button">Switch on</button><p id="status" hidden></p></div>
+</div>
+    <p class="cap-left">
+      panel view — the panel canvas is scaled to a fractional width, so it is for playing, not for judging pixels
+    </p>
+  </div>
+  <figure class="mag-view">
+    <canvas id="magnified" width="240" height="240" role="img"
+            aria-label="The screen at an integer pixel scale"></canvas>
+    <figcaption id="magcap">exact pixels</figcaption>
+  </figure>
 </div>
 <div id="mon"><span class="t">midi</span> — press Switch on, then PLAY</div>
 <div style="max-width:1040px;margin:6px auto 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -87,6 +115,7 @@ footer small { font-size:11px; opacity:.8; }
 </main>
 <script src="ui.js"></script>
 <script src="panel.js"></script>
+<script src="ui_gallery.js"></script>
 <script src="emu.js"></script>
 </body>
 </html>
