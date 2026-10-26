@@ -120,14 +120,18 @@ static void ui_draw_drum_card(void)
     cv_blit(0, 115);
 }
 
-/* ---- ARP (r16j drawArp verbatim): strip y16..28, ring center (120,112)
+/* ---- ARP (r16j drawArp): strip y16..28, ring center (120,112)
  * r76, ticks/pulses on the circle, north pointer, numbers row y196..216. ---- */
-static const int16_t RING_SIN[64] = {0,175,349,519,684,843,995,1138,1271,1393,1503,1601,1686,1757,1815,1858,1886,1899,1897,1880,1847,1800,1739,1664,1576,1476,1364,1242,1111,972,826,673,516,355,192,27,-138,-305,-470,-632,-789,-941,-1086,-1223,-1352,-1471,-1580,-1677,-1762,-1833,-1889,-1929,-1954,-1962,-1954,-1930,-1889,-1833,-1762,-1677,-1580,-1471,-1352,-1223};
+#include "ring_table.h"                  /* RING_UX/RING_UY: 64 Q12 directions */
+/* Point i of an n-point ring: direction a = i*64/n, north = slot 0, clockwise.
+ * One table serves every n (a track's euclid length is any 1..64); before
+ * rev.36 this used a hand-typed RING_SIN[64] whose real period was ~70.75
+ * steps, so it drew a 33%-wobbling not-quite-circle. */
 static void ring_pt(int i, int n, int rad, int cx, int cy, int *px, int *py)
 {
-    int a = i * 64 / n;                              /* north = slot 0, clockwise */
-    *px = cx + RING_SIN[a & 63] * rad / 1962;
-    *py = cy - RING_SIN[(a + 16) & 63] * rad / 1962;
+    int a = i * 64 / n;
+    *px = cx + (RING_UX[a & 63] * rad >> 12);
+    *py = cy + (RING_UY[a & 63] * rad >> 12);
 }
 
 static void draw_arp(void)
@@ -253,8 +257,8 @@ static void draw_arp(void)
     {
         int a;
         for (a = 0; a < 64; a++) {                   /* guide circle r+4 */
-            int gx = cx + RING_SIN[a & 63] * (r + 4) / 1962;
-            int gy = cy - RING_SIN[(a + 16) & 63] * (r + 4) / 1962;
+            int gx = cx + (RING_UX[a & 63] * (r + 4) >> 12);
+            int gy = cy + (RING_UY[a & 63] * (r + 4) >> 12);
             cv_pset(gx, gy, RGB565(58, 58, 68));
         }
         for (i = 0; i < n; i++) {
@@ -280,8 +284,8 @@ static void draw_arp(void)
         if (rel < (int)len) {
             int ph = rel % n, px, py;
             int a = ph * 64 / n;
-            px = cx + RING_SIN[a & 63] * (r + 8) / 1962;
-            py = cy - RING_SIN[(a + 16) & 63] * (r + 8) / 1962;
+            px = cx + (RING_UX[a & 63] * (r + 8) >> 12);
+            py = cy + (RING_UY[a & 63] * (r + 8) >> 12);
             cv_disc(px, py, 2, C_WHITE);
         }
     }

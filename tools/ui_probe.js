@@ -651,6 +651,59 @@ createMod().then((M) => {
         frame();
     }
 
+    /* ---- RING: the ARP ring must actually be a circle -------------------
+     * rev.36. The old painter carried a hand-typed RING_SIN[64] whose real
+     * period was ~70.75 steps; paired with a 64-step index and a (a+16)
+     * quarter-turn shift it drew a shape whose radius wobbled 33%
+     * (0.888r..1.182r). Its own entries were the proof: T[a]^2 + T[a+16]^2
+     * ran over 0.81..1.35 of the ideal 1962^2. Nothing measured the ring, so
+     * it survived from r16j through the C port into the firmware.
+     *
+     * Two things make this probe non-vacuous, both learned the hard way here:
+     *   1. A fresh track draws the "K4 - generate" hint page and returns
+     *      before the ring at all, so generate first.
+     *   2. The guide colour is shared with the strip separators, so only
+     *      pixels at roughly the guide radius may be counted. */
+    {
+        btn(B_ARP);
+        M._ds_web_enc(EN_K4, 1);             /* generate: otherwise no ring */
+        const fb = frame();
+        const GUIDE = '56,56,64';            /* RGB565(58,58,68), quantised */
+        const CX = 120, CY = 112, RG = 76 + 4;
+        const radii = [];
+        for (let y = CY - RG - 4; y <= CY + RG + 4; y++)
+            for (let x = CX - RG - 4; x <= CX + RG + 4; x++) {
+                if (x < 0 || x > 239 || y < 0 || y > 223) continue;
+                if (px(fb, x, y) !== GUIDE) continue;
+                const d = Math.hypot(x - CX, y - CY);
+                if (Math.abs(d - RG) <= 3) radii.push(d);   /* ring, not a separator */
+            }
+        const rmin = radii.length ? Math.min(...radii) : 0;
+        const rmax = radii.length ? Math.max(...radii) : 0;
+        check(radii.length >= 40,
+              'RING: the guide circle is drawn (64 pixels expected)',
+              radii.length + ' px at r~' + RG);
+        check(rmax - rmin <= 2,
+              'RING: every guide pixel sits on ONE radius (a circle, not a wobble)',
+              'n=' + radii.length + ' r=' + rmin.toFixed(1) + '..' + rmax.toFixed(1));
+        check(Math.abs(rmin - RG) <= 1.5 && Math.abs(rmax - RG) <= 1.5,
+              'RING: the guide radius is r+4 = ' + RG + ' as the painter intends',
+              'r=' + rmin.toFixed(1) + '..' + rmax.toFixed(1));
+
+        /* slot 0 is north by contract. With a real circle several pixels share
+         * the top row, so require that one of them is directly above the centre
+         * rather than demanding a unique topmost pixel. */
+        let topY = 999;
+        for (let y = CY - RG - 4; y < CY; y++)
+            for (let x = CX - 3; x <= CX + 3; x++)
+                if (x >= 0 && x <= 239 && px(fb, x, y) === GUIDE) topY = Math.min(topY, y);
+        check(topY <= CY - RG + 2,
+              'RING: slot 0 is due north (a guide pixel sits directly above the centre)',
+              'topmost near centre y=' + topY + ' (expect ~' + (CY - RG) + ')');
+        btn(B_SEQ);
+        frame();
+    }
+
     console.log(fails ? '== ' + fails + ' UI PROBE FAILURES ==' : 'UI PROBE OK');
     process.exit(fails ? 1 : 0);
 });
