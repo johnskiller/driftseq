@@ -126,12 +126,24 @@ static void ui_draw_drum_card(void)
 /* Point i of an n-point ring: direction a = i*64/n, north = slot 0, clockwise.
  * One table serves every n (a track's euclid length is any 1..64); before
  * rev.36 this used a hand-typed RING_SIN[64] whose real period was ~70.75
- * steps, so it drew a 33%-wobbling not-quite-circle. */
+ * steps, so it drew a 33%-wobbling not-quite-circle.
+ *
+ * Q12 needs rounding, not truncation. A bare >>12 floors, and flooring a
+ * negative product rounds away from the centre, so the west half of the ring
+ * sat up to 0.5 px further out than the east half: measured on the framebuffer
+ * the guide radius spread was 1.84 px where a perfectly rounded circle at the
+ * same radius spreads 0.99 px. Adding half an lsb first makes it symmetric
+ * (round-half-up, which is fine for a symmetric shape: both ends move the same
+ * way relative to the centre). Confirmed pixel-exact against the rendered PNG. */
+static int ring_scale(int v, int rad)
+{
+    return (v * rad + 2048) >> 12;
+}
 static void ring_pt(int i, int n, int rad, int cx, int cy, int *px, int *py)
 {
     int a = i * 64 / n;
-    *px = cx + (RING_UX[a & 63] * rad >> 12);
-    *py = cy + (RING_UY[a & 63] * rad >> 12);
+    *px = cx + ring_scale(RING_UX[a & 63], rad);
+    *py = cy + ring_scale(RING_UY[a & 63], rad);
 }
 
 static void draw_arp(void)
@@ -257,8 +269,8 @@ static void draw_arp(void)
     {
         int a;
         for (a = 0; a < 64; a++) {                   /* guide circle r+4 */
-            int gx = cx + (RING_UX[a & 63] * (r + 4) >> 12);
-            int gy = cy + (RING_UY[a & 63] * (r + 4) >> 12);
+            int gx = cx + ring_scale(RING_UX[a & 63], r + 4);
+            int gy = cy + ring_scale(RING_UY[a & 63], r + 4);
             cv_pset(gx, gy, RGB565(58, 58, 68));
         }
         for (i = 0; i < n; i++) {
@@ -284,8 +296,8 @@ static void draw_arp(void)
         if (rel < (int)len) {
             int ph = rel % n, px, py;
             int a = ph * 64 / n;
-            px = cx + (RING_UX[a & 63] * (r + 8) >> 12);
-            py = cy + (RING_UY[a & 63] * (r + 8) >> 12);
+            px = cx + ring_scale(RING_UX[a & 63], r + 8);
+            py = cy + ring_scale(RING_UY[a & 63], r + 8);
             cv_disc(px, py, 2, C_WHITE);
         }
     }

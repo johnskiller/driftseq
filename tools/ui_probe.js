@@ -683,9 +683,10 @@ createMod().then((M) => {
         check(radii.length >= 40,
               'RING: the guide circle is drawn (64 pixels expected)',
               radii.length + ' px at r~' + RG);
-        check(rmax - rmin <= 2,
+        check(rmax - rmin <= 1.2,
               'RING: every guide pixel sits on ONE radius (a circle, not a wobble)',
-              'n=' + radii.length + ' r=' + rmin.toFixed(1) + '..' + rmax.toFixed(1));
+              'n=' + radii.length + ' r=' + rmin.toFixed(2) + '..' + rmax.toFixed(2) +
+              ' spread=' + (rmax - rmin).toFixed(2) + 'px');
         check(Math.abs(rmin - RG) <= 1.5 && Math.abs(rmax - RG) <= 1.5,
               'RING: the guide radius is r+4 = ' + RG + ' as the painter intends',
               'r=' + rmin.toFixed(1) + '..' + rmax.toFixed(1));
